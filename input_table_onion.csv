@@ -1,0 +1,16 @@
+variable;lower;median;upper;distribution;label;Description;
+var_CV;5;NA;20;posnorm;Coefficient of variation;Coefficient of variation (measure of relative variability);
+operating_years;1;NA;1;const;Season;Model simulates one growing season with different temperatures;
+planting_yday;75;NA;100;posnorm;Planting day of year ;Day of the year on which onions are planted ;
+base_temp;3;NA;6;posnorm;Base temperature Onion growth ;Base temperature requirement for onions to grow ;
+GDD_field_emergence_required;80;NA;120;posnorm;GDD required for field emeregence;GDD requirment to finish field emergence for onions;
+GDD_vegetative_required;300;NA;500;posnorm;GDD required for veg phase ;;
+GDD_bulbing_required;400;NA;700;posnorm;GDD required for bulbing phase ;GDD requirment for bulbing phase ;
+GDD_maturation_required;200;NA;300;posnorm;GDD required for maturation;GDD requirement to finish bulbing phase ;
+latitude_koeln_bonn;50.866;NA;50.866;const;Latitude of Koeln Bonn Airport;;Latitude of Koeln Bonn Airport (required for PAR calculation)
+Krs;0.17;NA;0.17;const;empirical coefficient used in the Hargreaves radiation formula;used to estimate incoming solar radiation (Rs) from extraterrestrial radiation (Ra) and temperature difference;
+risk_botrytis_low;0.1;NA;0.2;posnorm;Risk of boytritis;Risk of boytritis infection;
+risk_botrytis_medium;0.2;NA;0.3;posnorm;Risk of boytritis;Risk of boytritis infection;
+risk_botrytis_high;0.3;NA;0.4;posnorm;Risk of boytritis;Risk of boytritis infection;
+yield_reduction_botrytis;0.05;NA;0.1;posnorm;Yield Reduction Botrytis;Yield reduction cause by botrytis;
+yield_reduction_seed_bed_preparation;0.05;NA;0.1;posnorm;Yield Loss due to suboptimal seed bed;Yield reduction caused by heavy rain or drought and results in suboptimal seed bed preparation;
