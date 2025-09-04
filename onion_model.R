@@ -13,6 +13,9 @@ library(lubridate) # Ensure lubridate is loaded for yday()
 # This part is only required if no weather file is created with a weather generator yet. 
 # If weather data already exists, jump to line 80 and load file directly.
 
+## Weather Data Generator
+
+
 flist <- list.files('future_weather/', full.names = TRUE)
 
 future_weather <- purrr::map(flist, function(file_path) {
@@ -78,7 +81,14 @@ weather_combined$id_seaon <- paste(weather_combined$id, weather_combined$season,
 
 #write.csv(weather_combined, 'weather_onion_koeln-bonn.csv')
 
-weather_combined <- read.csv("weather_onion_koeln-bonn.csv")
+### Start here if weather already exists and saved in your project folder 
+
+## Depending on the format in which you saved the weather file, RDS is recommended for large data frames 
+
+#weather_combined <- read.csv("weather_koeln-bonn.csv") 
+weather_combined <- readRDS("weather_koeln-bonn.RDS")
+
+## This step is required to get the weather data in the correct structure required for the code 
 
 weather_combined$Tavg <- ( weather_combined$Tmax + weather_combined$Tmin ) / 2
 
@@ -131,9 +141,7 @@ weather_list <- split(x = weather_combined, f = weather_combined$id_seaon)
 scenarios <- c("historical", "ssp126", "ssp245", "ssp370", "ssp585")
 
 
-
 # Weather Lists justs needs to be calculated once, model picks different random season each run.
-
 
 
 ##### Input Table Onion model
@@ -784,7 +792,7 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
       bulbing     = biomass_bulbing,
       maturation  = biomass_maturation,
       total       = total_biomass_current_scenario, # Using the calculated total
-      total_yield_per_ha = (total_biomass_current_scenario * HI_onions * onions_per_ha * dry_onion_weight) / 1000000 # Using the calculated total
+      total_yield_t_per_ha = (total_biomass_current_scenario * HI_onions * onions_per_ha * dry_onion_weight) / 1000000 # Using the calculated total
     )
   })
   
@@ -794,22 +802,27 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
 
 
 # Run the Monte Carlo simulation using the model function
-model_mc_simulation <- mcSimulation(estimate = as.estimate(input_variables),
+mc_data <- mcSimulation(estimate = as.estimate(input_variables),
                                     model_function = onion_climate_impact,
                                     numberOfModelRuns = 100,
                                     functionSyntax = "plainNames")
 
-saveRDS(model_mc_simulation, "MC_results/mc_onions.RDS")
+
+## Plot Onion yield 
+
+# If the model needs to be saved it can be done here 
+  
+#saveRDS(model_mc_simulation, "MC_results/mc_onions.RDS")
 #write.csv(model_mc_simulation, "MC_results/mc_onions.csv")
 
-onions<-readRDS("MC_results/mc_onions.RDS")
+#onions<-readRDS("MC_results/mc_onions.RDS")
 #onions<-read.csv("MC_results/mc_onions.csv")
 
-hist_all <- onions$y[, grepl("historical", names(onions$y))]
-ssp1_all <- onions$y[, grepl("ssp1", names(onions$y))]
-ssp2_all <- onions$y[, grepl("ssp2", names(onions$y))]
-ssp3_all <- onions$y[, grepl("ssp3", names(onions$y))]
-ssp5_all <- onions$y[, grepl("ssp5", names(onions$y))]
+hist_all <- onions$y[, grepl("historical", names(mc_data$y))]
+ssp1_all <- onions$y[, grepl("ssp1", names(mc_data$y))]
+ssp2_all <- onions$y[, grepl("ssp2", names(mc_data$y))]
+ssp3_all <- onions$y[, grepl("ssp3", names(mc_data$y))]
+ssp5_all <- onions$y[, grepl("ssp5", names(mc_data$y))]
 
 hist_all_long <- hist_all %>%
   pivot_longer(cols = everything(), names_to = "Name", values_to = "Value")
@@ -836,15 +849,34 @@ scenarios_long$Name <- gsub("weather_historical.", "", scenarios_long$Name, fixe
 scenarios_long$Name <- gsub("weather_ssp126.", "", scenarios_long$Name, fixed = T)
 scenarios_long$Name <- gsub("weather_ssp245.", "", scenarios_long$Name, fixed = T)
 scenarios_long$Name <- gsub("weather_ssp370.", "", scenarios_long$Name, fixed = T)
-scenarios_long$Name, fixed = T)
 scenarios_long$Name <- gsub("weather_ssp585.", "", scenarios_long$Name, fixed = T)
 summary(scenarios_long$Name)
 
 
-ggplot(scenarios_long, aes(x=Name, y=Value))+
-  geom_boxplot()+
-  ylab("g/plant &  t/ha")+
-  xlab("Biomass of Growth Phase")+
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
-        text = element_text(size = 25))+
-  facet_wrap(~ Scenario, ncol = 5)
+decisionSupport::plot_distributions(mcSimulation_object = mc_data,
+                                    vars = c("weather_historical.total_yield_per_ha", "weather_ssp126.total_yield_per_ha",
+                                             "weather_ssp245.total_yield_per_ha", "weather_ssp370.total_yield_per_ha", "weather_ssp585.total_yield_per_ha"),
+                                    method = "boxplot",
+                                    #method = "smooth_simple_overlay",
+                                    old_names = c("weather_historical.total_yield_per_ha", "weather_ssp126.total_yield_per_ha",
+                                                  "weather_ssp245.total_yield_per_ha", "weather_ssp370.total_yield_per_ha", "weather_ssp585.total_yield_per_ha"),
+                                    new_names = c("historical", "ssp126", "ssp245", "ssp370", "ssp585"), 
+                                    x_axis_name = "Onion yield per ha [t]",
+                                    y_axis_name = "Weather Scenarios",
+                                    scale_x_discrete(limits = c("weather_historical.total_yield_per_ha", "weather_ssp126.total_yield_per_ha",
+                                                                "weather_ssp245.total_yield_per_ha", "weather_ssp370.total_yield_per_ha", "weather_ssp585.total_yield_per_ha"))+
+  labs(
+    title = "Figure 1. Probabilistic distributions of Net Present Value",
+    subtitle = "Agroforestry intervention with current funding vs. conventional farming",
+    caption = "Figure 1 shows the comparison of Net Present Value (NPV) outcomes for agroforestry (Apple alley cropping) vs monoculture system (baseline). The x-axis displays NPV values (i.e., the sum of discounted annual cash flows). The higher and wider the box, the greater the potential return and variability in outcomes under that system."
+  ) +
+  coord_flip() +
+  labs(
+    x = "Onion yield per ha [t]",
+    y = "Weather Scenarios"
+  ))
+
+  
+
+
+  
