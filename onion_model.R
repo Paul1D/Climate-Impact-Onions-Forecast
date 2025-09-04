@@ -8,7 +8,10 @@ library(dplyr)
 library(ggh4x)
 library(introdataviz)
 library(lubridate) # Ensure lubridate is loaded for yday()
-#test
+
+
+# This part is only required if no weather file is created with a weather generator yet. 
+# If weather data already exists, jump to line 80 and load file directly.
 
 flist <- list.files('future_weather/', full.names = TRUE)
 
