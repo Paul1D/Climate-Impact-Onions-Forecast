@@ -339,7 +339,7 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
       return(0)
     }
   }
- 
+  
   
   #Drought Stress
   
@@ -544,7 +544,8 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
     }
   }
   
-  #####  Apply stresss functions
+  ##### Apply stresss functions
+  ##### Apply stresss functions
   
   season_risks <- lapply(weather_scenario_list, function(df) {
     
@@ -572,13 +573,19 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
     emergence_PAR  <- safe_mean(df$PAR, emergence_filter)
     emergence_consec_wet <- safe_max(df$day_consec_wet, emergence_filter)
     
+    emergence_seed_bed_stress      <- get_seedbed_stress(Prec = emergence_Prec, Tavg = emergence_Tavg, day_consec_wet = emergence_consec_wet)
+    emergence_drought_stress       <- get_drought_stress(Prec = emergence_Prec, Tavg = emergence_Tavg, day_consec_wet = emergence_consec_wet)
+    emergence_extreme_rain_stress  <- get_extreme_rain_stress(Prec = emergence_Prec)
+    emergence_weed_pressure_stress <- get_weed_pressure_stress(PAR = emergence_PAR, Prec = emergence_Prec, day_consec_wet = emergence_consec_wet) 
+    emergence_fusarium_stress      <- get_fusarium_stress(Prec = emergence_Prec, Tavg = emergence_Tavg, day_consec_wet = emergence_consec_wet) 
+    emergence_onino_fly_stress     <- get_onion_fly_stress(Tavg = emergence_Tavg, Prec = emergence_Prec) 
+    emergence_wireworm_stress      <- get_wireworm_stress(Tavg = emergence_Tavg, Prec = emergence_Prec)
+    
     emergence_stress <- 0
-    if (any(emergence_filter, na.rm = TRUE)) {
-      emergence_stress <- emergence_stress +
-        get_weed_pressure_stress(PAR = emergence_PAR, Prec = emergence_Prec, day_consec_wet = emergence_consec_wet) +
-        get_fusarium_stress(Prec = emergence_Prec, Tavg = emergence_Tavg, day_consec_wet = emergence_consec_wet) +
-        get_onion_fly_stress(Tavg = emergence_Tavg, Prec = emergence_Prec) +
-        get_wireworm_stress(Tavg = emergence_Tavg, Prec = emergence_Prec)
+    if (any(emergence_filter, na.rm = TRUE)) { 
+      emergence_stress <- emergence_stress + emergence_seed_bed_stress + emergence_drought_stress +  
+        emergence_extreme_rain_stress + emergence_weed_pressure_stress + emergence_fusarium_stress + 
+        emergence_onino_fly_stress + emergence_wireworm_stress
     }
     
     # --- VEGETATIVE PHASE STRESSORS
@@ -589,14 +596,19 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
     vegetative_PAR  <- safe_mean(df$PAR, vegetative_filter)
     vegetative_consec_wet <- safe_max(df$day_consec_wet, vegetative_filter)
     
+    vegetative_drought_stress       <- get_drought_stress(Prec = vegetative_Prec, Tavg = vegetative_Tavg, day_consec_wet = vegetative_consec_wet)
+    vegetative_extreme_rain_stress  <- get_extreme_rain_stress(Prec = vegetative_Prec) # Added
+    vegetative_fusarium_stress      <- get_fusarium_stress(Prec = vegetative_Prec, Tavg = vegetative_Tavg, day_consec_wet = vegetative_consec_wet)
+    vegetative_downy_mildew_stress  <- get_downy_mildew_stress(Prec = vegetative_Prec, Tavg = vegetative_Tavg, day_consec_wet = vegetative_consec_wet)
+    vegetative_thrips_stress        <- get_thrips_stress(Tavg = vegetative_Tavg, Prec = vegetative_Prec)
+    vegetative_leafhopper_stress    <- get_leafhopper_stress(Tavg = vegetative_Tavg, Prec = vegetative_Prec)
+    vegetative_onion_fly_stress     <- get_onion_fly_stress(Tavg = vegetative_Tavg, Prec = vegetative_Prec)
+    
     vegetative_stress <- 0
     if (any(vegetative_filter, na.rm = TRUE)) {
-      vegetative_stress <- vegetative_stress +
-        get_fusarium_stress(Prec = vegetative_Prec, Tavg = vegetative_Tavg, day_consec_wet = vegetative_consec_wet) +
-        get_downy_mildew_stress(Prec = vegetative_Prec, Tavg = vegetative_Tavg, day_consec_wet = vegetative_consec_wet) +
-        get_thrips_stress(Tavg = vegetative_Tavg, Prec = vegetative_Prec) +
-        get_leafhopper_stress(Tavg = vegetative_Tavg, Prec = vegetative_Prec) +
-        get_onion_fly_stress(Tavg = vegetative_Tavg, Prec = vegetative_Prec)
+      vegetative_stress <- vegetative_stress + vegetative_drought_stress + vegetative_extreme_rain_stress + vegetative_fusarium_stress + # Added
+        vegetative_downy_mildew_stress + vegetative_thrips_stress + vegetative_leafhopper_stress +
+        vegetative_onion_fly_stress
     }
     
     # --- BULBING PHASE STRESSORS
@@ -607,13 +619,17 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
     bulbing_PAR  <- safe_mean(df$PAR, bulbing_filter)
     bulbing_consec_wet <- safe_max(df$day_consec_wet, bulbing_filter)
     
+    bulbing_drought_stress       <- get_drought_stress(Prec = bulbing_Prec, Tavg = bulbing_Tavg, day_consec_wet = bulbing_consec_wet)
+    bulbing_extreme_rain_stress  <- get_extreme_rain_stress(Prec = bulbing_Prec) # Added
+    bulbing_botrytis_stress      <- get_botrytis_stress(Prec = bulbing_Prec, Tavg = bulbing_Tavg, day_consec_wet = bulbing_consec_wet)
+    bulbing_fusarium_stress      <- get_fusarium_stress(Prec = bulbing_Prec, Tavg = bulbing_Tavg, day_consec_wet = bulbing_consec_wet)
+    bulbing_downy_mildew_stress  <- get_downy_mildew_stress(Prec = bulbing_Prec, Tavg = bulbing_Tavg, day_consec_wet = bulbing_consec_wet)
+    bulbing_onion_fly_stress     <- get_onion_fly_stress(Tavg = bulbing_Tavg, Prec = bulbing_Prec)
+    
     bulbing_stress <- 0
     if (any(bulbing_filter, na.rm = TRUE)) {
-      bulbing_stress <- bulbing_stress +
-        get_botrytis_stress(Prec = bulbing_Prec, Tavg = bulbing_Tavg, day_consec_wet = bulbing_consec_wet) +
-        get_fusarium_stress(Prec = bulbing_Prec, Tavg = bulbing_Tavg, day_consec_wet = bulbing_consec_wet) +
-        get_downy_mildew_stress(Prec = bulbing_Prec, Tavg = bulbing_Tavg, day_consec_wet = bulbing_consec_wet) +
-        get_onion_fly_stress(Tavg = bulbing_Tavg, Prec = bulbing_Prec)
+      bulbing_stress <- bulbing_stress + bulbing_drought_stress + bulbing_extreme_rain_stress + bulbing_botrytis_stress + bulbing_fusarium_stress + # Added
+        bulbing_downy_mildew_stress + bulbing_onion_fly_stress
     }
     
     # --- MATURATION PHASE STRESSORS
@@ -624,24 +640,60 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
     maturation_PAR  <- safe_mean(df$PAR, maturation_filter)
     maturation_consec_wet <- safe_max(df$day_consec_wet, maturation_filter)
     
+    maturation_drought_stress       <- get_drought_stress(Prec = maturation_Prec, Tavg = maturation_Tavg, day_consec_wet = maturation_consec_wet)
+    maturation_extreme_rain_stress  <- get_extreme_rain_stress(Prec = maturation_Prec) # Added
+    maturation_botrytis_stress      <- get_botrytis_stress(Prec = maturation_Prec, Tavg = maturation_Tavg, day_consec_wet = maturation_consec_wet)
+    maturation_fusarium_stress      <- get_fusarium_stress(Prec = maturation_Prec, Tavg = maturation_Tavg, day_consec_wet = maturation_consec_wet)
+    maturation_downy_mildew_stress  <- get_downy_mildew_stress(Prec = maturation_Prec, Tavg = maturation_Tavg, day_consec_wet = maturation_consec_wet)
+    maturation_onion_fly_stress     <- get_onion_fly_stress(Tavg = maturation_Tavg, Prec = maturation_Prec)
+    
     maturation_stress <- 0
     if (any(maturation_filter, na.rm = TRUE)) {
-      maturation_stress <- maturation_stress +
-        get_botrytis_stress(Prec = maturation_Prec, Tavg = maturation_Tavg, day_consec_wet = maturation_consec_wet) +
-        get_fusarium_stress(Prec = maturation_Prec, Tavg = maturation_Tavg, day_consec_wet = maturation_consec_wet) +
-        get_downy_mildew_stress(Prec = maturation_Prec, Tavg = maturation_Tavg, day_consec_wet = maturation_consec_wet) +
-        get_onion_fly_stress(Tavg = maturation_Tavg, Prec = maturation_Prec)
+      maturation_stress <- maturation_stress + maturation_drought_stress + maturation_extreme_rain_stress + maturation_botrytis_stress + maturation_fusarium_stress + # Added
+        maturation_downy_mildew_stress + maturation_onion_fly_stress
     }
     
-    # --- RETURN: Named list per phase
+    # --- RETURN: Named list with individual stressors and total stress per phase
     return(list(
-      emergence_phase_stress = emergence_stress,
-      vegetative_phase_stress = vegetative_stress,
-      bulbing_phase_stress = bulbing_stress,
-      maturation_phase_stress = maturation_stress
+      # Emergence Phase
+      emergence_stress = emergence_stress,
+      emergence_seed_bed_stress = emergence_seed_bed_stress,
+      emergence_drought_stress = emergence_drought_stress,
+      emergence_extreme_rain_stress = emergence_extreme_rain_stress,
+      emergence_weed_pressure_stress = emergence_weed_pressure_stress,
+      emergence_fusarium_stress = emergence_fusarium_stress,
+      emergence_onino_fly_stress = emergence_onino_fly_stress,
+      emergence_wireworm_stress = emergence_wireworm_stress,
+      
+      # Vegetative Phase
+      vegetative_stress = vegetative_stress,
+      vegetative_drought_stress = vegetative_drought_stress,
+      vegetative_extreme_rain_stress = vegetative_extreme_rain_stress,
+      vegetative_fusarium_stress = vegetative_fusarium_stress,
+      vegetative_downy_mildew_stress = vegetative_downy_mildew_stress,
+      vegetative_thrips_stress = vegetative_thrips_stress,
+      vegetative_leafhopper_stress = vegetative_leafhopper_stress,
+      vegetative_onion_fly_stress = vegetative_onion_fly_stress,
+      
+      # Bulbing Phase
+      bulbing_stress = bulbing_stress,
+      bulbing_drought_stress = bulbing_drought_stress,
+      bulbing_extreme_rain_stress = bulbing_extreme_rain_stress, 
+      bulbing_botrytis_stress = bulbing_botrytis_stress,
+      bulbing_fusarium_stress = bulbing_fusarium_stress,
+      bulbing_downy_mildew_stress = bulbing_downy_mildew_stress,
+      bulbing_onion_fly_stress = bulbing_onion_fly_stress,
+      
+      # Maturation Phase
+      maturation_stress = maturation_stress,
+      maturation_drought_stress = maturation_drought_stress,
+      maturation_extreme_rain_stress = maturation_extreme_rain_stress, 
+      maturation_botrytis_stress = maturation_botrytis_stress,
+      maturation_fusarium_stress = maturation_fusarium_stress,
+      maturation_downy_mildew_stress = maturation_downy_mildew_stress,
+      maturation_onion_fly_stress = maturation_onion_fly_stress
     ))
   })
-  
   
   # Combine weather data and seasonal risk info
   weather_scenario_list <- Map(function(weather_df, risks) {
@@ -782,40 +834,81 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
       ), na.rm = TRUE)
     } else 0
     
-    # Output as list
-    # Corrected: Calculate total_biomass_current_scenario before using it for total_yield
+    # Calculate total biomass and yield
     total_biomass_current_scenario <- biomass_emergence + biomass_veg + biomass_bulbing + biomass_maturation
+    total_yield_t_per_ha <- (total_biomass_current_scenario * HI_onions * onions_per_ha * dry_onion_weight) / 1000000
     
+    # Return the list of biomass results and total yield for the current scenario
     list(
       emergence   = biomass_emergence,
       vegetative  = biomass_veg,
       bulbing     = biomass_bulbing,
       maturation  = biomass_maturation,
-      total       = total_biomass_current_scenario, # Using the calculated total
-      total_yield_t_per_ha = (total_biomass_current_scenario * HI_onions * onions_per_ha * dry_onion_weight) / 1000000 # Using the calculated total
+      total       = total_biomass_current_scenario,
+      total_yield_t_per_ha = total_yield_t_per_ha,
+      maturation_fusarium = weather_scenario_list$weather_ssp126$maturation_fusarium_stress[1],
+      # Emergence Phase
+      emergence_stress = emergence_stress,
+      emergence_seed_bed_stress = emergence_seed_bed_stress,
+      emergence_drought_stress = emergence_drought_stress,
+      emergence_extreme_rain_stress = emergence_extreme_rain_stress,
+      emergence_weed_pressure_stress = emergence_weed_pressure_stress,
+      emergence_fusarium_stress = emergence_fusarium_stress,
+      emergence_onino_fly_stress = emergence_onino_fly_stress,
+      emergence_wireworm_stress = emergence_wireworm_stress,
+      
+      # Vegetative Phase
+      vegetative_stress = vegetative_stress,
+      vegetative_drought_stress = vegetative_drought_stress,
+      vegetative_extreme_rain_stress = vegetative_extreme_rain_stress, # Added
+      vegetative_fusarium_stress = vegetative_fusarium_stress,
+      vegetative_downy_mildew_stress = vegetative_downy_mildew_stress,
+      vegetative_thrips_stress = vegetative_thrips_stress,
+      vegetative_leafhopper_stress = vegetative_leafhopper_stress,
+      vegetative_onion_fly_stress = vegetative_onion_fly_stress,
+      
+      # Bulbing Phase
+      bulbing_stress = bulbing_stress,
+      bulbing_drought_stress = bulbing_drought_stress,
+      bulbing_extreme_rain_stress = bulbing_extreme_rain_stress, # Added
+      bulbing_botrytis_stress = bulbing_botrytis_stress,
+      bulbing_fusarium_stress = bulbing_fusarium_stress,
+      bulbing_downy_mildew_stress = bulbing_downy_mildew_stress,
+      bulbing_onion_fly_stress = bulbing_onion_fly_stress,
+      
+      # Maturation Phase
+      maturation_stress = maturation_stress,
+      maturation_drought_stress = maturation_drought_stress,
+      maturation_extreme_rain_stress = maturation_extreme_rain_stress, # Added
+      maturation_botrytis_stress = maturation_botrytis_stress,
+      maturation_fusarium_stress = maturation_fusarium_stress,
+      maturation_downy_mildew_stress = maturation_downy_mildew_stress,
+      maturation_onion_fly_stress = maturation_onion_fly_stress
+      mazturai = 2
+      
     )
   })
   
-  return(biomass_all_scenarios) # This returns the list of biomass results for each scenario
+  return(biomass_all_scenarios) # This returns the list of biomass results and new comparison variables
   
 }
 
 
 # Run the Monte Carlo simulation using the model function
 mc_data <- mcSimulation(estimate = as.estimate(input_variables),
-                                    model_function = onion_climate_impact,
-                                    numberOfModelRuns = 100,
-                                    functionSyntax = "plainNames")
+                        model_function = onion_climate_impact,
+                        numberOfModelRuns = 100,
+                        functionSyntax = "plainNames")
 
 
 ## Plot Onion yield 
 
 # If the model needs to be saved it can be done here 
-  
-#saveRDS(model_mc_simulation, "MC_results/mc_onions.RDS")
+
+saveRDS(mc_data, "MC_results/mc_onions.RDS")
 #write.csv(model_mc_simulation, "MC_results/mc_onions.csv")
 
-#onions<-readRDS("MC_results/mc_onions.RDS")
+onions<-readRDS("MC_results/mc_onions.RDS")
 #onions<-read.csv("MC_results/mc_onions.csv")
 
 hist_all <- onions$y[, grepl("historical", names(mc_data$y))]
@@ -852,31 +945,56 @@ scenarios_long$Name <- gsub("weather_ssp370.", "", scenarios_long$Name, fixed = 
 scenarios_long$Name <- gsub("weather_ssp585.", "", scenarios_long$Name, fixed = T)
 summary(scenarios_long$Name)
 
-
 decisionSupport::plot_distributions(mcSimulation_object = mc_data,
-                                    vars = c("weather_historical.total_yield_per_ha", "weather_ssp126.total_yield_per_ha",
-                                             "weather_ssp245.total_yield_per_ha", "weather_ssp370.total_yield_per_ha", "weather_ssp585.total_yield_per_ha"),
+                                    vars = c("weather_historical.total_yield_t_per_ha", "weather_ssp126.total_yield_t_per_ha",
+                                             "weather_ssp245.total_yield_t_per_ha", "weather_ssp370.total_yield_t_per_ha", "weather_ssp585.total_yield_t_per_ha"),
                                     method = "boxplot",
-                                    #method = "smooth_simple_overlay",
-                                    old_names = c("weather_historical.total_yield_per_ha", "weather_ssp126.total_yield_per_ha",
-                                                  "weather_ssp245.total_yield_per_ha", "weather_ssp370.total_yield_per_ha", "weather_ssp585.total_yield_per_ha"),
+                                    old_names = c("weather_historical.total_yield_t_per_ha", "weather_ssp126.total_yield_t_per_ha",
+                                                  "weather_ssp245.total_yield_t_per_ha", "weather_ssp370.total_yield_t_per_ha", "weather_ssp585.total_yield_t_per_ha"),
                                     new_names = c("historical", "ssp126", "ssp245", "ssp370", "ssp585"), 
-                                    x_axis_name = "Onion yield per ha [t]",
-                                    y_axis_name = "Weather Scenarios",
-                                    scale_x_discrete(limits = c("weather_historical.total_yield_per_ha", "weather_ssp126.total_yield_per_ha",
-                                                                "weather_ssp245.total_yield_per_ha", "weather_ssp370.total_yield_per_ha", "weather_ssp585.total_yield_per_ha"))+
+                                    x_axis_name = "Onion Yield [t/ha]",
+                                    y_axis_name = "Weather Scenarios") +
   labs(
-    title = "Figure 1. Probabilistic distributions of Net Present Value",
-    subtitle = "Agroforestry intervention with current funding vs. conventional farming",
-    caption = "Figure 1 shows the comparison of Net Present Value (NPV) outcomes for agroforestry (Apple alley cropping) vs monoculture system (baseline). The x-axis displays NPV values (i.e., the sum of discounted annual cash flows). The higher and wider the box, the greater the potential return and variability in outcomes under that system."
-  ) +
-  coord_flip() +
-  labs(
-    x = "Onion yield per ha [t]",
-    y = "Weather Scenarios"
-  ))
+    title = "Figure 1. Probabilistic distributions of onion yields",
+    subtitle = "Historical and Future onion yield comparisson for different weather scenarios",
+    caption = "Figure 1 This figure compares onion yields (t/ha) under historical climatic conditions versus future weather scenarios. 
+    The boxplots show the distribution of yields for each of the Shared Socioeconomic Pathways (SSPs), with higher numbers representing scenarios with greater CO₂ emissions. 
+    The x-axis shows the onion yield, while the y-axis displays the weather scenarios. A higher and wider box indicates a greater potential yield and more variability in outcomes for that specific climate scenario.")
 
-  
+###### PLS & VIP
+
+### Sorting Data frames
+
+sim_results_today <- mc_data
+sim_results_today$y <- sim_results_today$y["weather_historical.total_yield_t_per_ha"]
+
+sim_results_ssp126 <- mc_data
+sim_results_ssp126$y <- sim_results_ssp126$y["weather_ssp126.total_yield_t_per_ha"]
 
 
-  
+###pls+vip+plot marketable yield####
+#PLS regression to compute the Variable Importance in Projection (VIP) for yield in t/ha
+
+pls_result_today_yield <- plsr.mcSimulation(object = sim_results_today,
+                                            resultName = names(sim_results_today$y)[2], ncomp = 1)
+pls_result_126_yield <- plsr.mcSimulation(object = sim_results_126,
+                                          resultName = names(sim_results_126$y)[2], ncomp = 1)
+pls_result_245_yield <- plsr.mcSimulation(object = sim_results_245,
+                                          resultName = names(sim_results_245$y)[2], ncomp = 1)
+pls_result_370_yield <- plsr.mcSimulation(object = sim_results_370,
+                                          resultName = names(sim_results_370$y)[2], ncomp = 1)
+pls_result_585_yield <- plsr.mcSimulation(object = sim_results_585,
+                                          resultName = names(sim_results_585$y)[2], ncomp = 1)
+
+# 1. PLSR auf den Monte Carlo Ergebnissen ausführen
+plsr_results <- plsr.mcSimulation(
+  object = sim_results_ssp126,
+  # Geben Sie die Ergebnisvariable an, für die Sie die Sensitivität wünschen
+  resultName = "weather_ssp126.total_yield_t_per_ha", 
+  ncomp = 1 # Optionale Angabe der Anzahl der Komponenten
+)
+
+# 2. Das Ergebnis mit der Plot-Funktion visualisieren
+plot_pls(plsr_results, threshold = 0.8)
+
+
