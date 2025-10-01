@@ -7,72 +7,6 @@
  library(dplyr)
  library(ggh4x)
 
-#library(lubridate) # Ensure lubridate is loaded for yday()
-
-flist <- list.files('future_weather/', full.names = TRUE)
-
-future_weather <- purrr::map(flist, function(file_path) {
-  
-  # Extract filename
-  filename <- basename(file_path) # just the file name, no directory
-  
-  # Split by '.' and extract parts
-  name_parts <- str_split(filename, '\\.')[[1]]
-  
-  # Check if name_parts is long enough
-  if (length(name_parts) < 5) {
-    stop(paste("Filename", filename, "does not have enough parts."))
-  }
-  
-  # Read and process the file
-  read.csv(file_path) %>%
-    select(-X) %>%
-    mutate(
-      ssp = name_parts[3],
-      gcm = name_parts[4],
-      scenario_year = name_parts[5],
-      yday = lubridate::yday(DATE),
-      season = ifelse(yday >= 0, Year + 1, Year)
-    )
-})
-
-future_weather <- do.call('rbind', future_weather)
-future_weather$id = paste(future_weather$ssp, future_weather$gcm, future_weather$scenario_year, sep = '--')
-
-
-#weed out incomplete seasons
-drop_list <- future_weather %>%
-  group_by(id, season) %>%
-  summarise(n = n()) %>%
-  filter(n < 365)
-
-future_weather <- future_weather %>%
-  filter(!(paste(id, season) %in% paste(drop_list$id, drop_list$season)))
-
-hist_weather <- read.csv('weather_2020_koeln-bonn.csv') %>%
-  mutate(scenario_year = 2020,
-         ssp = 'historical',
-         gcm = 'historical',
-         yday = lubridate::yday(DATE),
-         season = ifelse(yday >= 0,
-                         yes = Year  +1,
-                         no = Year),
-         id = paste(ssp, gcm, scenario_year, sep = '--'))
-drop_list <- hist_weather %>%
-  group_by(id, season) %>%
-  summarise(n = n()) %>%
-  filter(n < 365)
-hist_weather <- hist_weather %>%
-  filter(!(paste(id, season) %in% paste(drop_list$id, drop_list$season)))
-
-#combine hist and future weather
-weather_combined <- future_weather %>%
-  rbind(hist_weather)
-
-#add unique id to each seaoson
-weather_combined$id_seaon <- paste(weather_combined$id, weather_combined$season, sep = '--')
-
-#write.csv(weather_combined, 'weather_koeln-bonn.csv')
 
 #weather_combined <- read.csv("weather_koeln-bonn.csv")
 
@@ -139,7 +73,7 @@ scenarios <- c("historical", "ssp126", "ssp245", "ssp370", "ssp585")
 ##### Input Table Onion model
 
 
-input_variables <- read.csv("input_table_onion.csv", header = TRUE, sep = ";")
+input_variables <- read.csv("input_table_onion_new.csv", header = TRUE, sep = ";")
 
 make_variables <- function(est,n=1)
 { x<-random(rho=est, n=n)
@@ -314,389 +248,613 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
   ## Abiotic stress factors
   
   # Seedbed preparation
+  #Prec in mm/day 
+
+  get_seedbed_stress <- function(Prec,
+                               day_consec_wet,
+                               prec_seedbed_medium_p,
+                               prec_seedbed_high_p,
+                               risk_seedbed_medium_t,
+                               risk_seedbed_high_t,
+                               risk_additional_day = 0.05) {
   
-  get_seedbed_stress <- function(Prec, Tavg, day_consec_wet) {
-    # Trockenstress: zu wenig Regen + heißen Tagen
-    if (day_consec_wet < day_consec_wet_seedbed_upper_limit_risk_high_p & Prec < Prec_seedbed_upper_limit_risk_high_p & Tavg > Tavg_seedbed_lower_limit_risk_high_p) {
-      return(chance_event(
-        chance = risk_seedbed_high_p,
-        value_if = yield_reduction_seedbed_p,
-        value_if_not = 0))
-    } else if (day_consec_wet < day_consec_wet_seedbed_upper_limit_risk_medium_p & Prec < Prec_seedbed_upper_limit_risk_medium_p) {
-      return(chance_event(
-        chance = risk_seedbed_medium_p,
-        value_if = yield_reduction_seedbed_p,
-        value_if_not = 0))
-    } else {
-      return(0)
-    }
+  # base risk depending on precipitation thresholds
+  if (Prec > prec_seedbed_high_p) {
+    risk_seedbed <- risk_seedbed_high_t
+  } else if (Prec > prec_seedbed_medium_p) {
+    risk_seedbed <- risk_seedbed_medium_t
+  } else {
+    risk_seedbed <- 0
   }
  
+  # scale risk by consecutive wet days
+  risk_seedbed <- risk_seedbed + (day_consec_wet - 1) * risk_additional_day ###Rethink depending on how its calculated
   
-  #Drought Stress
+  # cap at 1 (100%)
+  risk_seedbed <- pmin(risk_seedbed, 1)
   
+  return(risk_seedbed)
+}
+
   
-  get_drought_stress <- function(Prec, Tavg, day_consec_wet) {
-    if (Prec < Prec_drought_upper_limit_risk_high_p & Tavg > Tavg_drought_lower_limit_risk_high_p) {
-      return(chance_event(
-        chance =  risk_drought_high_p,
-        value_if = yield_reduction_drought_p,
-        value_if_not = 0))
-    } else if (Prec < Prec_drought_upper_limit_risk_medium_p & day_consec_wet < day_consec_wet_drought_upper_limit_risk_medium_p) {
-      return(chance_event(
-        chance = risk_drought_medium_p,
-        value_if = yield_reduction_drought_p,
-        value_if_not = 0))
-    } else {
-      return(0)
-    }
+#Drought Stress
+  
+  get_drought_stress <- function(Prec,
+                                 Tavg,
+                                 days_consec_dry,
+                                 prec_drought_threshold_p,
+                                 Tavg_drought_threshold_p,         # threshold temp where drought stress starts
+                                 impact_prec_drought_t,      # stakeholder input 0–100
+                                 impact_days_dry_drought_t,          # stakeholder input 0.1–1
+                                 impact_temp_drought_t     # stakeholder input 0.1–1
+                                ) {
+    
+    # --- 1. Precipitation component ---
+    # Active if Prec below threshold → the drier, the higher the risk
+    R_P <- ifelse(Prec < prec_drought_threshold_p,
+                  1 - exp(- (impact_prec_drought_t / 2) * (prec_drought_threshold_p - Prec)),
+                  0)
+    R_P <- pmin(R_P, 1)
+    
+    # --- 2. Temperature component ---
+    # Higher temps = higher risk, saturating to 1
+    R_T <- ifelse(Tavg > Tavg_drought_threshold_p,
+                  1 - exp(- (impact_temp_drought_t / 2) * (Tavg - Tavg_drought_threshold_p)),
+                  0)
+    R_T <- pmin(R_T, 1)
+    
+    # --- 3. Consecutive dry days component ---
+    R_D <- 1 - exp(- (impact_days_dry_drought_t / 2) * days_consec_dry)
+    
+    # --- Combined drought risk (multiplicative) ---
+    risk <- R_P * R_T * R_D
+    risk_drought <- pmin(risk, 1)   # saf25ety cap
+    
+    return(risk_drought)
+  }
+  
+  # Hail Stress
+  
+  get_hail_stress <- function(Tavg,
+                              Prec,
+                              prec_hail_threshold_p,
+                              Tavg_hail_threshold_p,
+                              impact_days_hail_t) {
+    
+    # hail-trigger days = days with both high rainfall AND high temperature
+    hail_days <- sum(Prec >= prec_hail_threshold_p &
+                       Tavg >= Tavg_hail_threshold_p, na.rm = TRUE)
+    
+    # convert to risk with exponential saturation
+    risk_hail <- 1 - exp(- (impact_days_hail_t / 2) * hail_days)
+    
+    return(pmin(risk_hail, 1))
   }
   
   
   # Extreme Rainfall
-  
-  get_extreme_rain_stress <- function(Prec) {
-    if (Prec > Prec_extreme_rain_lower_limit_risk_high_p) {
-      return(chance_event(
-        chance = risk_extreme_rain_high_p,
-        value_if = yield_reduction_extreme_rain_p,
-        value_if_not = 0))
-    } else if (Prec > Prec_extreme_rain_lower_limit_risk_medium_p) {
-      return(chance_event(
-        chance = risk_extreme_rain_medium_p,
-        value_if = yield_reduction_extreme_rain_p,
-        value_if_not = 0))
-    } else {
-      return(0)
-    }
+  get_extreme_rain_stress <- function(Prec,
+                                      prec_extreme_rain_medium_p,
+                                      prec_extreme_rain_high_p,
+                                      impact_days_extreme_rain_t) {impact_days_extreme_rain_t
+    
+    # count days exceeding thresholds
+    extreme_days_medium <- sum(Prec >= prec_extreme_rain_medium_p &
+                                 Prec < prec_extreme_rain_high_p, na.rm = TRUE)
+    extreme_days_high   <- sum(Prec >= prec_extreme_rain_high_p, na.rm = TRUE)
+    
+    # combine into weighted "extreme days"
+    weighted_extreme_days <- extreme_days_medium + 2 * extreme_days_high
+    
+    # convert to risk with exponential saturation
+    risk_extreme_rain <- 1 - exp(- (impact_days_extreme_rain_t / 2) * weighted_extreme_days)
+    
+    return(pmin(risk_extreme_rain, 1))
+
   }
-  
   ## Harvest Risk
   
   
   
   ### Biotic Stress Factors
   
-  ## Weed Pressure
-  # Low PAR , little bit of rain helps emergence, this needs to be updated any maybe different conditions for different phases
-  
-  get_weed_pressure_stress <- function(PAR, Prec, day_consec_wet) {
-    if (PAR < PAR_weed_upper_limit_risk_high_p) {
-      if (Prec >= Prec_weed_lower_limit_risk_high_p & day_consec_wet >= day_consec_wet_weed_lower_limit_risk_high_p) {
-        return(chance_event(
-          chance = risk_weed_high_p,
-          value_if = yield_reduction_weed_p,
-          value_if_not = 0,
-        ))
-      } else if (Prec >= Prec_weed_lower_limit_risk_medium_p) {
-        return(chance_event(
-          chance =  risk_weed_medium_p,
-          value_if = yield_reduction_weed_p,
-          value_if_not = 0,
-        ))
-      } else {
-        return(0)
-      }
-    } else { # Added this else block
-      return(0)
-    }
-  }
-  
   ## Fungal Pathogens
   
   # Risk for Botrytis
-  
-  get_botrytis_stress <- function(Tavg, Prec, day_consec_wet) {
-    if (Prec >= Prec_botrytis_lower_limit_risk_high_p & day_consec_wet >= day_consec_wet_botrytis_lower_limit_risk_high_p) {
-      return(chance_event(
-        chance = risk_neck_rot_high_p,
-        value_if = yield_reduction_neck_rot_p,
-        value_if_not = 0,
-      ))
+
+    get_botrytis_stress <- function(Tavg,
+                                    Prec,
+                                    days_consec_wet,
+                                    prec_botrytis_threshold_p      = 1,   # mm threshold for "rainy day"
+                                    impact_prec_botrytis_t      = 50,  # 0–1; calibrates effect of daily rain amount
+                                    impact_days_wet_botrytis_t      = 40,  # 0–1; calibrates effect of consecutive wet days
+                                    Topt_botrytis_p        = 18,  # °C; optimum temperature for Botrytis
+                                    Twidth_botrytis_p      = 4   # °C; width around optimum
+                                    ) {
       
-    } else if (Prec >= Prec_botrytis_lower_limit_risk_medium_p) {
-      return(chance_event(
-        chance = risk_neck_rot_medium_p,
-        value_if = yield_reduction_neck_rot_p,
-        value_if_not = 0,
-      ))
-    } else {
-      return(0)
+      # --- 1. Precipitation component ---
+      R_P <- ifelse(Prec >= prec_botrytis_threshold_p,
+                    1 - exp(- (impact_prec_botrytis_t / 2) * (Prec - prec_botrytis_threshold_p)),
+                    0)
+      R_P <- pmin(R_P, 1)
+      
+      # --- 2. Consecutive wet days component ---
+      R_D <- 1 - exp(- (impact_days_wet_botrytis_t / 2) * days_consec_wet)
+      R_D <- pmin(R_D, 1)
+      
+      # --- 3. Temperature component (optimum around 15–20 °C) ---
+      R_T <- exp(- (Tavg - Topt_botrytis_p)^2 / (2 * Twidth_botrytis_p^2))
+      R_T <- pmin(R_T, 1)
+      
+      # --- Combined risk (multiplicative) ---
+      risk_botrytis <- pmin(R_P * R_D * R_T, 1)
+      
+      # --- Chance event ---
+      return(risk_botrytis)
     }
+    
+  
+  
+    get_fusarium_stress <- function(Tavg,
+                                    Prec,
+                                    days_consec_wet,
+                                    prec_fusarium_threshold_p,       # mm threshold for "wet" day
+                                    impact_prec_fusarium_t,          # 0–1; calibrates effect of daily rain
+                                    impact_days_wet_fusarium_t,      # 0–1; calibrates effect of consecutive wet days
+                                    Topt_fusarium_p,                 # °C; optimum for Fusarium infection
+                                    Twidth_fusarium_p               # °C; width around optimum
+                                    ) {
+      
+      # --- 1. Precipitation component (proxy for soil/root wetness) ---
+      R_P <- ifelse(Prec >= prec_fusarium_threshold_p,
+                    1 - exp(- (impact_prec_fusarium_t / 2) * (Prec - prec_fusarium_threshold_p)),
+                    0)
+      R_P <- pmin(R_P, 1)
+      
+      # --- 2. Consecutive wet days component ---
+      R_D <- 1 - exp(- (impact_days_wet_fusarium_t / 2) * days_consec_wet)
+      R_D <- pmin(R_D, 1)
+      
+      # --- 3. Temperature component (optimum ~27 °C for onion basal rot) ---
+      R_T <- exp(- (Tavg - Topt_fusarium_p)^2 / (2 * Twidth_fusarium_p^2))
+      R_T <- pmin(R_T, 1)
+      
+      # --- Combined risk (multiplicative) ---
+      risk_fusarium <- pmin(R_P * R_D * R_T, 1)
+      
+      # --- Chance event ---
+      return(risk_fusarium)
+    }
+  
+  ## Downy Mildew 
+  
+  get_downy_mildew_stress <- function(Tavg,
+                                      Prec,
+                                      days_consec_wet,
+                                      prec_mildew_threshold_p,      # mm threshold for "wet" day
+                                      impact_prec_mildew_t,       # 0–1; calibrates effect of daily rain
+                                      impact_days_wet_mildew_t,   # 0–1; calibrates effect of consecutive wet days
+                                      Topt_mildew_p,              # °C; optimum for downy mildew infection
+                                      Twidth_mildew_p            # °C; width around optimum
+                                      ) {
+    
+    # --- 1. Precipitation component (proxy for leaf wetness) ---
+    R_P <- ifelse(Prec >= prec_mildew_threshold_p,
+                  1 - exp(- (impact_prec_mildew_t / 2) * (Prec - prec_mildew_threshold_p)),
+                  0)
+    R_P <- pmin(R_P, 1)
+    
+    # --- 2. Consecutive wet days component ---
+    R_D <- 1 - exp(- (impact_days_wet_mildew_t / 2) * days_consec_wet)
+    R_D <- pmin(R_D, 1)
+    
+    # --- 3. Temperature component (optimum ~12 °C) ---
+    R_T <- exp(- (Tavg - Topt_mildew_p)^2 / (2 * Twidth_mildew_p^2))
+    R_T <- pmin(R_T, 1)
+    
+    # --- Combined risk (multiplicative) ---
+    risk_mildew <- pmin(R_P * R_D * R_T, 1)
+    
+    # --- Chance event ---
+    return(risk_mildew)
   }
   
-  
-  
-  # Fusarium (Fungi, soil, pathogen, wet & warm increases risk of infection)
-  get_fusarium_stress <- function(Tavg, Prec, day_consec_wet) {
-    if (Tavg >= Tavg_fusarium_lower_limit_all_risks_p & Tavg <= Tavg_fusarium_upper_limit_all_risks_p) {
-      if (Prec >= Prec_fusarium_lower_limit_risk_high_p & day_consec_wet >= day_consec_wet_fusarium_lower_limit_risk_high_p) {
-        return(chance_event(
-          chance =  risk_fusarium_high_p,
-          value_if = yield_reduction_fusarium_p,
-          value_if_not = 0,
-        ))
-      } else if (Prec >= Prec_fusarium_lower_limit_risk_medium_p) {
-        return(chance_event(
-          chance = risk_fusarium_medium_p,
-          value_if = yield_reduction_fusarium_p,
-          value_if_not = 0,
-        ))
-      } else {
-        return(0)
-      }
-    } else {
-      return(0)
-    }
-  }
-  
-  # Downy Mildew (Peronospora destructor) – cold nights , wet periods
-  
-  get_downy_mildew_stress <- function(Tavg, Prec, day_consec_wet) {
-    if (Tavg >= Tavg_downy_mildew_lower_limit_all_risks_p & Tavg <= Tavg_downy_mildew_upper_limit_all_risks_p) {
-      if (Prec >= Prec_downy_mildew_lower_limit_risk_high_p & day_consec_wet >= day_consec_wet_downy_mildew_lower_limit_risk_high_p) {
-        return(chance_event(
-          chance = risk_downy_mildew_high_p,
-          value_if = yield_reduction_downy_mildew_p,
-          value_if_not = 0,
-        ))
-      } else if (Prec >= Prec_downy_mildew_lower_limit_risk_medium_p) {
-        return(chance_event(
-          chance = risk_downy_mildew_medium_p,
-          value_if = yield_reduction_downy_mildew_p,
-          value_if_not = 0,
-        ))
-      } else {
-        return(0)
-      }
-    } else {
-      return(0)
-    }
-  }
   
   ## Animal Pressure
+  get_thrips_stress <- function(Tavg,
+                                Prec,
+                                days_consec_dry,
+                                prec_thrips_threshold_p,        # mm/day; rainfall threshold below which dryness contributes
+                                Topt_thrips_p,                  # °C; optimum for thrips development
+                                Twidth_thrips_p,                # °C; width around optimum
+                                impact_prec_thrips_t,           # 0–1; effect of dryness
+                                impact_days_dry_thrips_t       # 0–1; effect of consecutive dry days
+                                ) {     # proportional yield loss
+    
+    # --- 1. Precipitation component (dryness effect) ---
+    R_P <- ifelse(Prec < prec_thrips_threshold_p,
+                  1 - exp(- (impact_prec_thrips_t / 2) * (prec_thrips_threshold_p - Prec)),
+                  0)
+    R_P <- pmin(R_P, 1)
+    
+    # --- 2. Temperature component (optimum for thrips ~28 °C) ---
+    R_T <- exp(- (Tavg - Topt_thrips_p)^2 / (2 * Twidth_thrips_p^2))
+    R_T <- pmin(R_T, 1)
+    
+    # --- 3. Consecutive dry days component ---
+    R_D <- 1 - exp(- (impact_days_dry_thrips_t / 2) * days_consec_dry)
+    R_D <- pmin(R_D, 1)
   
-  # Thripse – heiß & trocken
-  get_thrips_stress <- function(Tavg, Prec) {
-    if (Tavg > Tavg_thrips_lower_limit_risk_high_p & Prec < Prec_thrips_upper_limit_risk_high_p) {
-      return(chance_event(
-        chance = risk_thrips_high_p,
-        value_if = yield_reduction_thrips_p,
-        value_if_not = 0,
-      ))
-    } else {
-      return(0)
-    }
+  # --- Combined risk ---
+  risk_thrips <- pmin(R_P * R_T * R_D, 1)
+  
+  return(risk_thrips)
+}
+
+  
+  get_onion_fly_stress <- function(Tavg,
+                                   Prec,
+                                   days_consec_wet,
+                                   prec_onion_fly_threshold_p,   # mm/day; rainfall threshold for wetness
+                                   Topt_onion_fly_p,             # °C; optimum for activity
+                                   Twidth_onion_fly_p,           # °C; width around optimum
+                                   impact_prec_onion_fly_t,      # 0–1; effect of wetness
+                                   impact_days_wet_onion_fly_t  # 0–1; effect of consecutive wet days
+                                   ) {
+    
+    # --- 1. Precipitation component (wetness effect) ---
+    R_P <- ifelse(Prec >= prec_onion_fly_threshold_p,
+                  1 - exp(- (impact_prec_onion_fly_t / 2) * (Prec - prec_onion_fly_threshold_p)),
+                  0)
+    R_P <- pmin(R_P, 1)
+    
+    # --- 2. Temperature component (optimum ~23 °C) ---
+    R_T <- exp(- (Tavg - Topt_onion_fly_p)^2 / (2 * Twidth_onion_fly_p^2))
+    R_T <- pmin(R_T, 1)
+    
+    # --- 3. Consecutive wet days ---
+    R_D <- 1 - exp(- (impact_days_wet_onion_fly_t / 2) * days_consec_wet)
+    R_D <- pmin(R_D, 1)
+    
+    # --- Combined risk ---
+    risk_onion_fly <- pmin(R_P * R_T * R_D, 1)
+    
+    return(risk_onion_fly * yield_reduction_onion_fly_t)
   }
   
-  # Zwiebelfliege – warm, leicht feucht fördert Larvenaktivität
-  get_onion_fly_stress <- function(Tavg, Prec) {
-    if (Tavg >= Tavg_onion_fly_lower_limit_all_risks_p) {
-      if (Prec >= Prec_onion_fly_lower_limit_risk_high_p) {
-        return(chance_event(
-          chance = risk_onion_fly_high_p,
-          value_if = yield_reduction_onion_fly_p,
-          value_if_not = 0
-        ))
-      } else { # This else belongs to 'if (Prec >= 1)'
-        return(chance_event(
-          chance = risk_onion_fly_medium_p,
-          value_if = yield_reduction_onion_fly_p,
-          value_if_not = 0
-        ))
-      }
-    } else {
-      return(0)
-    }
+  
+  get_wireworm_stress <- function(Tavg,
+                                  Prec,
+                                  days_consec_wet,
+                                  prec_wireworm_threshold_p,     # mm/day; rainfall threshold for wetness
+                                  Topt_wireworm_p,               # °C; optimum for activity
+                                  Twidth_wireworm_p,             # °C; width around optimum
+                                  impact_prec_wireworm_t,        # 0–1; effect of wetness
+                                  impact_days_wet_wireworm_t    # 0–1; effect of consecutive wet days
+                                  ) {
+    
+    # --- 1. Precipitation component (wetness effect) ---
+    R_P <- ifelse(Prec >= prec_wireworm_threshold_p,
+                  1 - exp(- (impact_prec_wireworm_t / 2) * (Prec - prec_wireworm_threshold_p)),
+                  0)
+    R_P <- pmin(R_P, 1)
+    
+    # --- 2. Temperature component (optimum ~18 °C) ---
+    R_T <- exp(- (Tavg - Topt_wireworm_p)^2 / (2 * Twidth_wireworm_p^2))
+    R_T <- pmin(R_T, 1)
+    
+    # --- 3. Consecutive wet days ---
+    R_D <- 1 - exp(- (impact_days_wet_wireworm_t / 2) * days_consec_wet)
+    R_D <- pmin(R_D, 1)
+    
+    # --- Combined risk ---
+    risk_wireworm <- pmin(R_P * R_T * R_D, 1)
+    
+    return(risk_wireworm * yield_reduction_wireworm_t)
   }
   
-  # Glasflügelzikade – trocken & warm bevorzugt
-  get_leafhopper_stress <- function(Tavg, Prec) {
-    if (Tavg >= Tavg_leafhopper_lower_limit_risk_medium_p & Prec < Prec_leafhopper_upper_limit_risk_medium_p) {
-      return(chance_event(
-        chance  = risk_leafhopper_medium_p,
-        value_if = yield_reduction_leafhopper_p,
-        value_if_not = 0,
-      ))
-    } else {
-      return(0)
-    }
-  }
-  
-  # Drahtwurm – moderate Temperaturen, feuchte Böden (Regen als Proxy)
-  get_wireworm_stress <- function(Tavg, Prec) {
-    if (Tavg >= Tavg_wireworm_lower_limit_all_risks_p & Tavg <= Tavg_wireworm_upper_limit_all_risks_p & Prec >= Prec_wireworm_lower_limit_all_risks_p) {
-      return(chance_event(
-        chance  = risk_wireworm_medium_p,
-        value_if = yield_reduction_wireworm_p,
-        value_if_not = 0,
-      ))
-    } else {
-      return(0)
-    }
-  }
   
   #####  Apply stresss functions
-  
+  #####  Apply stress functions
   season_risks <- lapply(weather_scenario_list, function(df) {
     
-    # Helper to calculate mean values safely
-    safe_mean <- function(x, condition) { # MODIFIED
-      if (any(condition, na.rm = TRUE)) {
-        mean(x[condition], na.rm = TRUE)
-      } else {
-        0 # Return 0 if no valid elements for averaging in this phase
-      }
+    safe_mean <- function(x, condition) {
+      if (any(condition, na.rm = TRUE)) mean(x[condition], na.rm = TRUE) else 0
     }
-    safe_max  <- function(x, condition) { # MODIFIED
-      if (any(condition, na.rm = TRUE)) {
-        max(x[condition], na.rm = TRUE)
-      } else {
-        0 # Return 0 if no valid elements for max in this phase
-      }
+    safe_max  <- function(x, condition) {
+      if (any(condition, na.rm = TRUE)) max(x[condition], na.rm = TRUE) else 0
     }
     
-    # --- EMERGENCE PHASE STRESSORS
+    ##### --- EMERGENCE PHASE ---
     emergence_filter <- df$in_emergence_phase == TRUE
-    
     emergence_Tavg <- safe_mean(df$Tavg, emergence_filter)
     emergence_Prec <- safe_mean(df$Prec, emergence_filter)
-    emergence_PAR  <- safe_mean(df$PAR, emergence_filter)
     emergence_consec_wet <- safe_max(df$day_consec_wet, emergence_filter)
     
-    emergence_seed_bed_stress      <- get_seedbed_stress(Prec = emergence_Prec, Tavg = emergence_Tavg, day_consec_wet = emergence_consec_wet)
-    emergence_drought_stress       <- get_drought_stress(Prec = emergence_Prec, Tavg = emergence_Tavg, day_consec_wet = emergence_consec_wet)
-    emergence_extreme_rain_stress  <- get_extreme_rain_stress(Prec = emergence_Prec)
-    emergence_weed_pressure_stress <- get_weed_pressure_stress(PAR = emergence_PAR, Prec = emergence_Prec, day_consec_wet = emergence_consec_wet) 
-    emergence_fusarium_stress      <- get_fusarium_stress(Prec = emergence_Prec, Tavg = emergence_Tavg, day_consec_wet = emergence_consec_wet) 
-    emergence_onino_fly_stress     <- get_onion_fly_stress(Tavg = emergence_Tavg, Prec = emergence_Prec) 
-    emergence_wireworm_stress      <- get_wireworm_stress(Tavg = emergence_Tavg, Prec = emergence_Prec)
+    # risks
+    emergence_seed_bed_risk <- get_seedbed_stress(emergence_Prec, emergence_consec_wet,
+                                                  prec_seedbed_medium_p,
+                                                  prec_seedbed_high_p,
+                                                  risk_seedbed_medium_t,
+                                                  risk_seedbed_high_t)
+    emergence_drought_risk <- get_drought_stress(emergence_Prec, emergence_Tavg, emergence_consec_wet,
+                                                 prec_drought_threshold_p,
+                                                 Tavg_drought_threshold_p,
+                                                 impact_prec_drought_t,
+                                                 impact_days_dry_drought_t,
+                                                 impact_temp_drought_t)
+    emergence_extreme_rain_risk <- get_extreme_rain_stress(df$Prec[emergence_filter],
+                                                           prec_extreme_rain_medium_p,
+                                                           prec_extreme_rain_high_p,
+                                                           impact_days_extreme_rain_t)
+    emergence_hail_risk <- get_hail_stress(df$Tavg[emergence_filter],
+                                           df$Prec[emergence_filter],
+                                           prec_hail_threshold_p,
+                                           Tavg_hail_threshold_p,
+                                           impact_days_hail_t)
+    emergence_fusarium_risk <- get_fusarium_stress(emergence_Tavg, emergence_Prec, emergence_consec_wet,
+                                                   prec_fusarium_threshold_p,
+                                                   impact_prec_fusarium_t,
+                                                   impact_days_wet_fusarium_t,
+                                                   Topt_fusarium_p,
+                                                   Twidth_fusarium_p)
+    emergence_onion_fly_risk <- get_onion_fly_stress(emergence_Tavg, emergence_Prec, emergence_consec_wet,
+                                                     prec_onion_fly_threshold_p,
+                                                     Topt_onion_fly_p,
+                                                     Twidth_onion_fly_p,
+                                                     impact_prec_onion_fly_t,
+                                                     impact_days_wet_onion_fly_t)
+    emergence_wireworm_risk <- get_wireworm_stress(emergence_Tavg, emergence_Prec, emergence_consec_wet,
+                                                   prec_wireworm_threshold_p,
+                                                   Topt_wireworm_p,
+                                                   Twidth_wireworm_p,
+                                                   impact_prec_wireworm_t,
+                                                   impact_days_wet_wireworm_t)
     
-    emergence_stress <- 0
-    if (any(emergence_filter, na.rm = TRUE)) {
-      emergence_stress <- emergence_stress +
-        get_weed_pressure_stress(PAR = emergence_PAR, Prec = emergence_Prec, day_consec_wet = emergence_consec_wet) +
-        get_fusarium_stress(Prec = emergence_Prec, Tavg = emergence_Tavg, day_consec_wet = emergence_consec_wet) +
-        get_onion_fly_stress(Tavg = emergence_Tavg, Prec = emergence_Prec) +
-        get_wireworm_stress(Tavg = emergence_Tavg, Prec = emergence_Prec)
-    }
+    # yield reductions
+    yield_reduction_seedbed_emergence <- chance_event(chance = emergence_seed_bed_risk, value_if = yield_reduction_seedbed_t, value_if_not = 1)
+    yield_reduction_drought_emergence <- chance_event(chance = emergence_drought_risk, value_if = yield_reduction_drought_t, value_if_not = 1)
+    yield_reduction_extreme_rain_emergence <- chance_event(chance = emergence_extreme_rain_risk, value_if = yield_reduction_extreme_rain_t, value_if_not = 1)
+    yield_reduction_hail_emergence <- chance_event(chance = emergence_hail_risk, value_if = yield_reduction_hail_p, value_if_not = 1)
+    yield_reduction_fusarium_emergence <- chance_event(chance = emergence_fusarium_risk, value_if = yield_reduction_fusarium_t, value_if_not = 1)
+    yield_reduction_onion_fly_emergence <- chance_event(chance = emergence_onion_fly_risk, value_if = yield_reduction_onion_fly_t, value_if_not = 1)
+    yield_reduction_wireworm_emergence <- chance_event(chance = emergence_wireworm_risk, value_if = yield_reduction_wireworm_t, value_if_not = 1)
     
-    # --- VEGETATIVE PHASE STRESSORS
+    ##### --- VEGETATIVE PHASE ---
     vegetative_filter <- df$in_vegetative_phase == TRUE
-    
     vegetative_Tavg <- safe_mean(df$Tavg, vegetative_filter)
     vegetative_Prec <- safe_mean(df$Prec, vegetative_filter)
-    vegetative_PAR  <- safe_mean(df$PAR, vegetative_filter)
     vegetative_consec_wet <- safe_max(df$day_consec_wet, vegetative_filter)
     
-    vegetative_drought_stress       <- get_drought_stress(Prec = vegetative_Prec, Tavg = vegetative_Tavg, day_consec_wet = vegetative_consec_wet)
-    vegetative_extreme_rain_stress  <- get_extreme_rain_stress(Prec = vegetative_Prec) # Added
-    vegetative_fusarium_stress      <- get_fusarium_stress(Prec = vegetative_Prec, Tavg = vegetative_Tavg, day_consec_wet = vegetative_consec_wet)
-    vegetative_downy_mildew_stress  <- get_downy_mildew_stress(Prec = vegetative_Prec, Tavg = vegetative_Tavg, day_consec_wet = vegetative_consec_wet)
-    vegetative_thrips_stress        <- get_thrips_stress(Tavg = vegetative_Tavg, Prec = vegetative_Prec)
-    vegetative_leafhopper_stress    <- get_leafhopper_stress(Tavg = vegetative_Tavg, Prec = vegetative_Prec)
-    vegetative_onion_fly_stress     <- get_onion_fly_stress(Tavg = vegetative_Tavg, Prec = vegetative_Prec)
+    vegetative_drought_risk <- get_drought_stress(vegetative_Prec, vegetative_Tavg, vegetative_consec_wet,
+                                                  prec_drought_threshold_p,
+                                                  Tavg_drought_threshold_p,
+                                                  impact_prec_drought_t,
+                                                  impact_days_dry_drought_t,
+                                                  impact_temp_drought_t)
+    vegetative_extreme_rain_risk <- get_extreme_rain_stress(df$Prec[vegetative_filter],
+                                                            prec_extreme_rain_medium_p,
+                                                            prec_extreme_rain_high_p,
+                                                            impact_days_extreme_rain_t)
+    vegetative_hail_risk <- get_hail_stress(df$Tavg[vegetative_filter],
+                                            df$Prec[vegetative_filter],
+                                            prec_hail_threshold_p,
+                                            Tavg_hail_threshold_p,
+                                            impact_days_hail_t)
+    vegetative_fusarium_risk <- get_fusarium_stress(vegetative_Tavg, vegetative_Prec, vegetative_consec_wet,
+                                                    prec_fusarium_threshold_p,
+                                                    impact_prec_fusarium_t,
+                                                    impact_days_wet_fusarium_t,
+                                                    Topt_fusarium_p,
+                                                    Twidth_fusarium_p)
+    vegetative_downy_mildew_risk <- get_downy_mildew_stress(vegetative_Tavg, vegetative_Prec, vegetative_consec_wet,
+                                                            prec_mildew_threshold_p,
+                                                            impact_prec_mildew_t,
+                                                            impact_days_wet_mildew_t,
+                                                            Topt_mildew_p,
+                                                            Twidth_mildew_p)
+    vegetative_thrips_risk <- get_thrips_stress(vegetative_Tavg, vegetative_Prec, vegetative_consec_wet,
+                                                prec_thrips_threshold_p,
+                                                Topt_thrips_p,
+                                                Twidth_thrips_p,
+                                                impact_prec_thrips_t,
+                                                impact_days_dry_thrips_t)
+    vegetative_onion_fly_risk <- get_onion_fly_stress(vegetative_Tavg, vegetative_Prec, vegetative_consec_wet,
+                                                      prec_onion_fly_threshold_p,
+                                                      Topt_onion_fly_p,
+                                                      Twidth_onion_fly_p,
+                                                      impact_prec_onion_fly_t,
+                                                      impact_days_wet_onion_fly_t)
     
+    # yield reductions
+    yield_reduction_drought_vegetative <- chance_event(chance = vegetative_drought_risk, value_if = yield_reduction_drought_t, value_if_not = 1)
+    yield_reduction_extreme_rain_vegetative <- chance_event(chance = vegetative_extreme_rain_risk, value_if = yield_reduction_extreme_rain_t, value_if_not = 1)
+    yield_reduction_hail_vegetative <- chance_event(chance = vegetative_hail_risk, value_if = yield_reduction_hail_p, value_if_not = 1)
+    yield_reduction_fusarium_vegetative <- chance_event(chance = vegetative_fusarium_risk, value_if = yield_reduction_fusarium_t, value_if_not = 1)
+    yield_reduction_downy_mildew_vegetative <- chance_event(chance = vegetative_downy_mildew_risk, value_if = yield_reduction_downy_mildew_t, value_if_not = 1)
+    yield_reduction_thrips_vegetative <- chance_event(chance = vegetative_thrips_risk, value_if = yield_reduction_thrips_t, value_if_not = 1)
+    yield_reduction_onion_fly_vegetative <- chance_event(chance = vegetative_onion_fly_risk, value_if = yield_reduction_onion_fly_t, value_if_not = 1)
     
-    vegetative_stress <- 0
-    if (any(vegetative_filter, na.rm = TRUE)) {
-      vegetative_stress <- vegetative_stress + vegetative_drought_stress + vegetative_extreme_rain_stress + vegetative_fusarium_stress + # Added
-        vegetative_downy_mildew_stress + vegetative_thrips_stress + vegetative_leafhopper_stress +
-        vegetative_onion_fly_stress
-    }
-    
-    # --- BULBING PHASE STRESSORS
+    ##### --- BULBING PHASE ---
     bulbing_filter <- df$in_bulbing_phase == TRUE
-    
     bulbing_Tavg <- safe_mean(df$Tavg, bulbing_filter)
     bulbing_Prec <- safe_mean(df$Prec, bulbing_filter)
-    bulbing_PAR  <- safe_mean(df$PAR, bulbing_filter)
     bulbing_consec_wet <- safe_max(df$day_consec_wet, bulbing_filter)
     
-    bulbing_drought_stress       <- get_drought_stress(Prec = bulbing_Prec, Tavg = bulbing_Tavg, day_consec_wet = bulbing_consec_wet)
-    bulbing_extreme_rain_stress  <- get_extreme_rain_stress(Prec = bulbing_Prec) # Added
-    bulbing_botrytis_stress      <- get_botrytis_stress(Prec = bulbing_Prec, Tavg = bulbing_Tavg, day_consec_wet = bulbing_consec_wet)
-    bulbing_fusarium_stress      <- get_fusarium_stress(Prec = bulbing_Prec, Tavg = bulbing_Tavg, day_consec_wet = bulbing_consec_wet)
-    bulbing_downy_mildew_stress  <- get_downy_mildew_stress(Prec = bulbing_Prec, Tavg = bulbing_Tavg, day_consec_wet = bulbing_consec_wet)
-    bulbing_onion_fly_stress     <- get_onion_fly_stress(Tavg = bulbing_Tavg, Prec = bulbing_Prec)
+    bulbing_drought_risk <- get_drought_stress(bulbing_Prec, bulbing_Tavg, bulbing_consec_wet,
+                                               prec_drought_threshold_p,
+                                               Tavg_drought_threshold_p,
+                                               impact_prec_drought_t,
+                                               impact_days_dry_drought_t,
+                                               impact_temp_drought_t)
+    bulbing_extreme_rain_risk <- get_extreme_rain_stress(df$Prec[bulbing_filter],
+                                                         prec_extreme_rain_medium_p,
+                                                         prec_extreme_rain_high_p,
+                                                         impact_days_extreme_rain_t)
+    bulbing_hail_risk <- get_hail_stress(df$Tavg[bulbing_filter],
+                                         df$Prec[bulbing_filter],
+                                         prec_hail_threshold_p,
+                                         Tavg_hail_threshold_p,
+                                         impact_days_hail_t)
+    bulbing_botrytis_risk <- get_botrytis_stress(bulbing_Tavg, bulbing_Prec, bulbing_consec_wet,
+                                                 prec_botrytis_threshold_p,
+                                                 impact_prec_botrytis_t,
+                                                 impact_days_wet_botrytis_t,
+                                                 Topt_botrytis_p,
+                                                 Twidth_botrytis_p)
+    bulbing_fusarium_risk <- get_fusarium_stress(bulbing_Tavg, bulbing_Prec, bulbing_consec_wet,
+                                                 prec_fusarium_threshold_p,
+                                                 impact_prec_fusarium_t,
+                                                 impact_days_wet_fusarium_t,
+                                                 Topt_fusarium_p,
+                                                 Twidth_fusarium_p)
+    bulbing_downy_mildew_risk <- get_downy_mildew_stress(bulbing_Tavg, bulbing_Prec, bulbing_consec_wet,
+                                                         prec_mildew_threshold_p,
+                                                         impact_prec_mildew_t,
+                                                         impact_days_wet_mildew_t,
+                                                         Topt_mildew_p,
+                                                         Twidth_mildew_p)
+    bulbing_onion_fly_risk <- get_onion_fly_stress(bulbing_Tavg, bulbing_Prec, bulbing_consec_wet,
+                                                   prec_onion_fly_threshold_p,
+                                                   Topt_onion_fly_p,
+                                                   Twidth_onion_fly_p,
+                                                   impact_prec_onion_fly_t,
+                                                   impact_days_wet_onion_fly_t)
     
-    bulbing_stress <- 0
-    if (any(bulbing_filter, na.rm = TRUE)) {
-      bulbing_stress <- bulbing_stress + bulbing_drought_stress + bulbing_extreme_rain_stress + bulbing_botrytis_stress + bulbing_fusarium_stress + # Added
-        bulbing_downy_mildew_stress + bulbing_onion_fly_stress
-    }
+    # yield reductions
+    yield_reduction_drought_bulbing <- chance_event(chance = bulbing_drought_risk, value_if = yield_reduction_drought_t, value_if_not = 1)
+    yield_reduction_extreme_rain_bulbing <- chance_event(chance = bulbing_extreme_rain_risk, value_if = yield_reduction_extreme_rain_t, value_if_not = 1)
+    yield_reduction_hail_bulbing <- chance_event(chance = bulbing_hail_risk, value_if = yield_reduction_hail_p, value_if_not = 1)
+    yield_reduction_botrytis_bulbing <- chance_event(chance = bulbing_botrytis_risk, value_if = yield_reduction_botrytis_t, value_if_not = 1)
+    yield_reduction_fusarium_bulbing <- chance_event(chance = bulbing_fusarium_risk, value_if = yield_reduction_fusarium_t, value_if_not = 1)
+    yield_reduction_downy_mildew_bulbing <- chance_event(chance = bulbing_downy_mildew_risk, value_if = yield_reduction_downy_mildew_t, value_if_not = 1)
+    yield_reduction_onion_fly_bulbing <- chance_event(chance = bulbing_onion_fly_risk, value_if = yield_reduction_onion_fly_t, value_if_not = 1)
     
-    # --- MATURATION PHASE STRESSORS
+    ##### --- MATURATION PHASE ---
     maturation_filter <- df$in_maturation_phase == TRUE
-    
     maturation_Tavg <- safe_mean(df$Tavg, maturation_filter)
     maturation_Prec <- safe_mean(df$Prec, maturation_filter)
-    maturation_PAR  <- safe_mean(df$PAR, maturation_filter)
     maturation_consec_wet <- safe_max(df$day_consec_wet, maturation_filter)
     
-    maturation_drought_stress       <- get_drought_stress(Prec = maturation_Prec, Tavg = maturation_Tavg, day_consec_wet = maturation_consec_wet)
-    maturation_extreme_rain_stress  <- get_extreme_rain_stress(Prec = maturation_Prec) # Added
-    maturation_botrytis_stress      <- get_botrytis_stress(Prec = maturation_Prec, Tavg = maturation_Tavg, day_consec_wet = maturation_consec_wet)
-    maturation_fusarium_stress      <- get_fusarium_stress(Prec = maturation_Prec, Tavg = maturation_Tavg, day_consec_wet = maturation_consec_wet)
-    maturation_downy_mildew_stress  <- get_downy_mildew_stress(Prec = maturation_Prec, Tavg = maturation_Tavg, day_consec_wet = maturation_consec_wet)
-    maturation_onion_fly_stress     <- get_onion_fly_stress(Tavg = maturation_Tavg, Prec = maturation_Prec)
+    maturation_drought_risk <- get_drought_stress(maturation_Prec, maturation_Tavg, maturation_consec_wet,
+                                                  prec_drought_threshold_p,
+                                                  Tavg_drought_threshold_p,
+                                                  impact_prec_drought_t,
+                                                  impact_days_dry_drought_t,
+                                                  impact_temp_drought_t)
+    maturation_extreme_rain_risk <- get_extreme_rain_stress(df$Prec[maturation_filter],
+                                                            prec_extreme_rain_medium_p,
+                                                            prec_extreme_rain_high_p,
+                                                            impact_days_extreme_rain_t)
+    maturation_hail_risk <- get_hail_stress(df$Tavg[maturation_filter],
+                                            df$Prec[maturation_filter],
+                                            prec_hail_threshold_p,
+                                            Tavg_hail_threshold_p,
+                                            impact_days_hail_t)
+    maturation_botrytis_risk <- get_botrytis_stress(maturation_Tavg, maturation_Prec, maturation_consec_wet,
+                                                    prec_botrytis_threshold_p,
+                                                    impact_prec_botrytis_t,
+                                                    impact_days_wet_botrytis_t,
+                                                    Topt_botrytis_p,
+                                                    Twidth_botrytis_p)
+    maturation_fusarium_risk <- get_fusarium_stress(maturation_Tavg, maturation_Prec, maturation_consec_wet,
+                                                    prec_fusarium_threshold_p,
+                                                    impact_prec_fusarium_t,
+                                                    impact_days_wet_fusarium_t,
+                                                    Topt_fusarium_p,
+                                                    Twidth_fusarium_p)
+    maturation_downy_mildew_risk <- get_downy_mildew_stress(maturation_Tavg, maturation_Prec, maturation_consec_wet,
+                                                            prec_mildew_threshold_p,
+                                                            impact_prec_mildew_t,
+                                                            impact_days_wet_mildew_t,
+                                                            Topt_mildew_p,
+                                                            Twidth_mildew_p)
+    maturation_onion_fly_risk <- get_onion_fly_stress(maturation_Tavg, maturation_Prec, maturation_consec_wet,
+                                                      prec_onion_fly_threshold_p,
+                                                      Topt_onion_fly_p,
+                                                      Twidth_onion_fly_p,
+                                                      impact_prec_onion_fly_t,
+                                                      impact_days_wet_onion_fly_t)
     
-    maturation_stress <- 0
-    if (any(maturation_filter, na.rm = TRUE)) {
-      maturation_stress <- maturation_stress +
-        get_botrytis_stress(Prec = maturation_Prec, Tavg = maturation_Tavg, day_consec_wet = maturation_consec_wet) +
-        get_fusarium_stress(Prec = maturation_Prec, Tavg = maturation_Tavg, day_consec_wet = maturation_consec_wet) +
-        get_downy_mildew_stress(Prec = maturation_Prec, Tavg = maturation_Tavg, day_consec_wet = maturation_consec_wet) +
-        get_onion_fly_stress(Tavg = maturation_Tavg, Prec = maturation_Prec)
-    }
+    # yield reductions
+    yield_reduction_drought_maturation <- chance_event(chance = maturation_drought_risk, value_if = yield_reduction_drought_t, value_if_not = 1)
+    yield_reduction_extreme_rain_maturation <- chance_event(chance = maturation_extreme_rain_risk, value_if = yield_reduction_extreme_rain_t, value_if_not = 1)
+    yield_reduction_hail_maturation <- chance_event(chance = maturation_hail_risk, value_if = yield_reduction_hail_p, value_if_not = 1)
+    yield_reduction_botrytis_maturation <- chance_event(chance = maturation_botrytis_risk, value_if = yield_reduction_botrytis_t, value_if_not = 1)
+    yield_reduction_fusarium_maturation <- chance_event(chance = maturation_fusarium_risk, value_if = yield_reduction_fusarium_t, value_if_not = 1)
+    yield_reduction_downy_mildew_maturation <- chance_event(chance = maturation_downy_mildew_risk, value_if = yield_reduction_downy_mildew_t, value_if_not = 1)
+    yield_reduction_onion_fly_maturation <- chance_event(chance = maturation_onion_fly_risk, value_if = yield_reduction_onion_fly_t, value_if_not = 1)
     
-    maturation_stress <- 0
-    if (any(maturation_filter, na.rm = TRUE)) {
-      maturation_stress <- maturation_stress + maturation_drought_stress + maturation_extreme_rain_stress + maturation_botrytis_stress + maturation_fusarium_stress + # Added
-        maturation_downy_mildew_stress + maturation_onion_fly_stress
-    }
-    
-    # --- RETURN: Named list with individual stressors and total stress per phase
+    ##### --- RETURN LIST ---
     return(list(
-      # Emergence Phase
-      emergence_stress = emergence_stress,
-      emergence_seed_bed_stress = emergence_seed_bed_stress,
-      emergence_drought_stress = emergence_drought_stress,
-      emergence_extreme_rain_stress = emergence_extreme_rain_stress,
-      emergence_weed_pressure_stress = emergence_weed_pressure_stress,
-      emergence_fusarium_stress = emergence_fusarium_stress,
-      emergence_onino_fly_stress = emergence_onino_fly_stress,
-      emergence_wireworm_stress = emergence_wireworm_stress,
+      # Emergence
+      emergence_seed_bed_risk = emergence_seed_bed_risk,
+      emergence_drought_risk = emergence_drought_risk,
+      emergence_extreme_rain_risk = emergence_extreme_rain_risk,
+      emergence_hail_risk = emergence_hail_risk,
+      emergence_fusarium_risk = emergence_fusarium_risk,
+      emergence_onion_fly_risk = emergence_onion_fly_risk,
+      emergence_wireworm_risk = emergence_wireworm_risk,
+      yield_reduction_seedbed_emergence = yield_reduction_seedbed_emergence,
+      yield_reduction_drought_emergence = yield_reduction_drought_emergence,
+      yield_reduction_extreme_rain_emergence = yield_reduction_extreme_rain_emergence,
+      yield_reduction_hail_emergence = yield_reduction_hail_emergence,
+      yield_reduction_fusarium_emergence = yield_reduction_fusarium_emergence,
+      yield_reduction_onion_fly_emergence = yield_reduction_onion_fly_emergence,
+      yield_reduction_wireworm_emergence = yield_reduction_wireworm_emergence,
       
-      # Vegetative Phase
-      vegetative_stress = vegetative_stress,
-      vegetative_drought_stress = vegetative_drought_stress,
-      vegetative_extreme_rain_stress = vegetative_extreme_rain_stress,
-      vegetative_fusarium_stress = vegetative_fusarium_stress,
-      vegetative_downy_mildew_stress = vegetative_downy_mildew_stress,
-      vegetative_thrips_stress = vegetative_thrips_stress,
-      vegetative_leafhopper_stress = vegetative_leafhopper_stress,
-      vegetative_onion_fly_stress = vegetative_onion_fly_stress,
+      # Vegetative
+      vegetative_drought_risk = vegetative_drought_risk,
+      vegetative_extreme_rain_risk = vegetative_extreme_rain_risk,
+      vegetative_hail_risk = vegetative_hail_risk,
+      vegetative_fusarium_risk = vegetative_fusarium_risk,
+      vegetative_downy_mildew_risk = vegetative_downy_mildew_risk,
+      vegetative_thrips_risk = vegetative_thrips_risk,
+      vegetative_onion_fly_risk = vegetative_onion_fly_risk,
+      yield_reduction_drought_vegetative = yield_reduction_drought_vegetative,
+      yield_reduction_extreme_rain_vegetative = yield_reduction_extreme_rain_vegetative,
+      yield_reduction_hail_vegetative = yield_reduction_hail_vegetative,
+      yield_reduction_fusarium_vegetative = yield_reduction_fusarium_vegetative,
+      yield_reduction_downy_mildew_vegetative = yield_reduction_downy_mildew_vegetative,
+      yield_reduction_thrips_vegetative = yield_reduction_thrips_vegetative,
+      yield_reduction_onion_fly_vegetative = yield_reduction_onion_fly_vegetative,
       
-      # Bulbing Phase
-      bulbing_stress = bulbing_stress,
-      bulbing_drought_stress = bulbing_drought_stress,
-      bulbing_extreme_rain_stress = bulbing_extreme_rain_stress, 
-      bulbing_botrytis_stress = bulbing_botrytis_stress,
-      bulbing_fusarium_stress = bulbing_fusarium_stress,
-      bulbing_downy_mildew_stress = bulbing_downy_mildew_stress,
-      bulbing_onion_fly_stress = bulbing_onion_fly_stress,
+      # Bulbing
+      bulbing_drought_risk = bulbing_drought_risk,
+      bulbing_extreme_rain_risk = bulbing_extreme_rain_risk,
+      bulbing_hail_risk = bulbing_hail_risk,
+      bulbing_botrytis_risk = bulbing_botrytis_risk,
+      bulbing_fusarium_risk = bulbing_fusarium_risk,
+      bulbing_downy_mildew_risk = bulbing_downy_mildew_risk,
+      bulbing_onion_fly_risk = bulbing_onion_fly_risk,
+      yield_reduction_drought_bulbing = yield_reduction_drought_bulbing,
+      yield_reduction_extreme_rain_bulbing = yield_reduction_extreme_rain_bulbing,
+      yield_reduction_hail_bulbing = yield_reduction_hail_bulbing,
+      yield_reduction_botrytis_bulbing = yield_reduction_botrytis_bulbing,
+      yield_reduction_fusarium_bulbing = yield_reduction_fusarium_bulbing,
+      yield_reduction_downy_mildew_bulbing = yield_reduction_downy_mildew_bulbing,
+      yield_reduction_onion_fly_bulbing = yield_reduction_onion_fly_bulbing,
       
-      # Maturation Phase
-      maturation_stress = maturation_stress,
-      maturation_drought_stress = maturation_drought_stress,
-      maturation_extreme_rain_stress = maturation_extreme_rain_stress, 
-      maturation_botrytis_stress = maturation_botrytis_stress,
-      maturation_fusarium_stress = maturation_fusarium_stress,
-      maturation_downy_mildew_stress = maturation_downy_mildew_stress,
-      maturation_onion_fly_stress = maturation_onion_fly_stress
+      # Maturation
+      maturation_drought_risk = maturation_drought_risk,
+      maturation_extreme_rain_risk = maturation_extreme_rain_risk,
+      maturation_hail_risk = maturation_hail_risk,
+      maturation_botrytis_risk = maturation_botrytis_risk,
+      maturation_fusarium_risk = maturation_fusarium_risk,
+      maturation_downy_mildew_risk = maturation_downy_mildew_risk,
+      maturation_onion_fly_risk = maturation_onion_fly_risk,
+      yield_reduction_drought_maturation = yield_reduction_drought_maturation,
+      yield_reduction_extreme_rain_maturation = yield_reduction_extreme_rain_maturation,
+      yield_reduction_hail_maturation = yield_reduction_hail_maturation,
+      yield_reduction_botrytis_maturation = yield_reduction_botrytis_maturation,
+      yield_reduction_fusarium_maturation = yield_reduction_fusarium_maturation,
+      yield_reduction_downy_mildew_maturation = yield_reduction_downy_mildew_maturation,
+      yield_reduction_onion_fly_maturation = yield_reduction_onion_fly_maturation
     ))
   })
+  
+  
+  
   
   
   # Combine weather data and seasonal risk info
@@ -724,10 +882,10 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
                   ifelse(Prec < f_W_0.5_p, 0.5, 0.7))
     
     # Stress (same scalar applied to all days in a phase)
-    f_S <- 1 - emergence_phase_stress
+    
     
     # Vectorized light interception & biomass increment
-    delta_B <- LUE_onion_p * PAR * (1 - exp(-lec_k_c * LAI_emergence_p)) * f_T * f_W * f_S
+    delta_B <- LUE_onion_p * PAR * (1 - exp(-lec_k_c * LAI_emergence_p)) * f_T * f_W 
     return(delta_B)
   }
   
@@ -742,9 +900,8 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
     f_W <- ifelse(Prec >= f_W_1_lower_p & Prec <= f_W_1_upper_p, 1,
                   ifelse(Prec < f_W_0.5_p, 0.5, 0.7))
     
-    f_S <- 1 - vegetative_phase_stress
     
-    delta_B <- LUE_onion_p * PAR * (1 - exp(-lec_k_c * LAI_veg_p)) * f_T * f_W * f_S
+    delta_B <- LUE_onion_p * PAR * (1 - exp(-lec_k_c * LAI_veg_p)) * f_T * f_W 
     return(delta_B)
   }
   
@@ -758,10 +915,9 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
     # Water availability
     f_W <- ifelse(Prec >= f_W_1_lower_p & Prec <= f_W_1_upper_p, 1,
                   ifelse(Prec < f_W_0.5_p, 0.5, 0.7))
+   
     
-    f_S <- 1 - bulbing_phase_stress
-    
-    delta_B <- LUE_onion_p * PAR * (1 - exp(-lec_k_c * LAI_bulbing_p)) * f_T * f_W * f_S
+    delta_B <- LUE_onion_p * PAR * (1 - exp(-lec_k_c * LAI_bulbing_p)) * f_T * f_W 
     return(delta_B)
   }
   
@@ -776,9 +932,9 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
     f_W <- ifelse(Prec >= f_W_1_lower_p & Prec <= f_W_1_upper_p, 1,
                   ifelse(Prec < f_W_0.5_p, 0.5, 0.7))
     
-    f_S <- 1 - maturation_phase_stress
+  
     
-    delta_B <- LUE_onion_p * PAR * (1 - exp(-lec_k_c * LAI_maturation_p)) * f_T * f_W * f_S
+    delta_B <- LUE_onion_p * PAR * (1 - exp(-lec_k_c * LAI_maturation_p)) * f_T * f_W 
     return(delta_B)
   }
   
@@ -799,6 +955,8 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
   
   #### Apply functions for all phases
   
+  #### Apply functions for all phases
+  
   biomass_all_scenarios <- lapply(weather_scenario_list, function(df) {
     
     # Emergence phase
@@ -809,8 +967,6 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
         LAI_emergence_p = LAI_emergence_p,
         Tavg = df_emergence$Tavg,
         Prec = df_emergence$Prec,
-        # CORRECTED: Use 'emergence_stress'
-        emergence_phase_stress = df$emergence_stress[1],
         LUE_onion_p = LUE_onion_p
       ), na.rm = TRUE)
     } else 0
@@ -823,8 +979,6 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
         LAI_veg_p = LAI_veg_p,
         Tavg = df_veg$Tavg,
         Prec = df_veg$Prec,
-        # CORRECTED: Use 'vegetative_stress'
-        vegetative_phase_stress = df$vegetative_stress[1],
         LUE_onion_p = LUE_onion_p
       ), na.rm = TRUE)
     } else 0
@@ -837,8 +991,6 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
         LAI_bulbing_p = LAI_bulbing_p,
         Tavg = df_bulbing$Tavg,
         Prec = df_bulbing$Prec,
-        # CORRECTED: Use 'bulbing_stress'
-        bulbing_phase_stress = df$bulbing_stress[1],
         LUE_onion_p = LUE_onion_p
       ), na.rm = TRUE)
     } else 0
@@ -851,58 +1003,26 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
         LAI_maturation_p = LAI_maturation_p,
         Tavg = df_maturation$Tavg,
         Prec = df_maturation$Prec,
-        # CORRECTED: Use 'maturation_stress'
-        maturation_phase_stress = df$maturation_stress[1],
         LUE_onion_p = LUE_onion_p
       ), na.rm = TRUE)
     } else 0
     
+    # Combine biomass across phases
     total_biomass_current_scenario <- biomass_emergence + biomass_veg + biomass_bulbing + biomass_maturation
-    total_yield_per_ha = (total_biomass_current_scenario *  onions_per_ha_p *(1- dry_onion_weight_p)) * HI_onions_p  / 1000/1000 
     
-    # Now extract the individual stress values to be included in the output
-    emergence_filter <- df$in_emergence_phase == TRUE
-    vegetative_filter <- df$in_vegetative_phase == TRUE
-    bulbing_filter <- df$in_bulbing_phase == TRUE
-    maturation_filter <- df$in_maturation_phase == TRUE
+    # Raw yield before stress
+    raw_yield_per_ha <- (total_biomass_current_scenario * onions_per_ha_p * (1 - dry_onion_weight_p)) * HI_onions_p / 1000 / 1000
     
-    yield_reducing_factors <- list(
-      emergence_stress = get_scalar(df, "emergence_stress", emergence_filter),
-      emergence_seed_bed_stress = get_scalar(df, "emergence_seed_bed_stress", emergence_filter),
-      emergence_drought_stress = get_scalar(df, "emergence_drought_stress", emergence_filter),
-      emergence_extreme_rain_stress = get_scalar(df, "emergence_extreme_rain_stress", emergence_filter),
-      emergence_weed_pressure_stress = get_scalar(df, "emergence_weed_pressure_stress", emergence_filter),
-      emergence_fusarium_stress = get_scalar(df, "emergence_fusarium_stress", emergence_filter),
-      emergence_onion_fly_stress = get_scalar(df, "emergence_onino_fly_stress", emergence_filter),
-      emergence_wireworm_stress = get_scalar(df, "emergence_wireworm_stress", emergence_filter),
-      
-      vegetative_stress = get_scalar(df, "vegetative_stress", vegetative_filter),
-      vegetative_drought_stress = get_scalar(df, "vegetative_drought_stress", vegetative_filter),
-      vegetative_extreme_rain_stress = get_scalar(df, "vegetative_extreme_rain_stress", vegetative_filter),
-      vegetative_fusarium_stress = get_scalar(df, "vegetative_fusarium_stress", vegetative_filter),
-      vegetative_downy_mildew_stress = get_scalar(df, "vegetative_downy_mildew_stress", vegetative_filter),
-      vegetative_thrips_stress = get_scalar(df, "vegetative_thrips_stress", vegetative_filter),
-      vegetative_leafhopper_stress = get_scalar(df, "vegetative_leafhopper_stress", vegetative_filter),
-      vegetative_onion_fly_stress = get_scalar(df, "vegetative_onion_fly_stress", vegetative_filter),
-      
-      bulbing_stress = get_scalar(df, "bulbing_stress", bulbing_filter),
-      bulbing_drought_stress = get_scalar(df, "bulbing_drought_stress", bulbing_filter),
-      bulbing_extreme_rain_stress = get_scalar(df, "bulbing_extreme_rain_stress", bulbing_filter),
-      bulbing_botrytis_stress = get_scalar(df, "bulbing_botrytis_stress", bulbing_filter),
-      bulbing_fusarium_stress = get_scalar(df, "bulbing_fusarium_stress", bulbing_filter),
-      bulbing_downy_mildew_stress = get_scalar(df, "bulbing_downy_mildew_stress", bulbing_filter),
-      bulbing_onion_fly_stress = get_scalar(df, "bulbing_onion_fly_stress", bulbing_filter),
-      
-      maturation_stress = get_scalar(df, "maturation_stress", maturation_filter),
-      maturation_drought_stress = get_scalar(df, "maturation_drought_stress", maturation_filter),
-      maturation_extreme_rain_stress = get_scalar(df, "maturation_extreme_rain_stress", maturation_filter),
-      maturation_botrytis_stress = get_scalar(df, "maturation_botrytis_stress", maturation_filter),
-      maturation_fusarium_stress = get_scalar(df, "maturation_fusarium_stress", maturation_filter),
-      maturation_downy_mildew_stress = get_scalar(df, "maturation_downy_mildew_stress", maturation_filter),
-      maturation_onion_fly_stress = get_scalar(df, "maturation_onion_fly_stress", maturation_filter)
-    )
+    # Collect all yield reduction multipliers (== value_if / value_if_not from chance_event)
+    yield_reductions <- df[1, grepl("^yield_reduction_", names(df))]
     
-    # Combine biomass and stress results into a single list
+    # Combined multiplier: product of all
+    combined_yield_multiplier <- prod(unlist(yield_reductions), na.rm = TRUE)
+    
+    # Final yield after applying stress
+    final_yield_per_ha <- raw_yield_per_ha * combined_yield_multiplier
+    
+    # Return everything
     final_output <- c(
       list(
         emergence_biomass = biomass_emergence,
@@ -910,15 +1030,15 @@ onion_climate_impact <- function(){ # Start of onion_climate_impact function
         bulbing_biomass = biomass_bulbing,
         maturation_biomass = biomass_maturation,
         total_biomass = total_biomass_current_scenario,
-        total_yield_per_ha = total_yield_per_ha
+        raw_yield_per_ha = raw_yield_per_ha,
+        final_yield_per_ha = final_yield_per_ha,
+        combined_yield_multiplier = combined_yield_multiplier
       ),
-      yield_reducing_factors
+      as.list(yield_reductions)  # keep all individual multipliers
     )
     
     return(final_output)
   })
-  
-  return(biomass_all_scenarios)
 }
 
 # Run the Monte Carlo simulation using the model function
