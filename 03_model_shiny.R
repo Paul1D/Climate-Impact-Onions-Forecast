@@ -1,6 +1,6 @@
 
 ################################################################################
- Onion Climate Impact Model
+# Onion Climate Impact Model
 ################################################################################
 
 
@@ -478,8 +478,6 @@ onion_climate_impact <- compiler::cmpfun(function() {
 ################################################################################
 # Monte Carlo Simulation
 ################################################################################
-message("🚀 Starting optimized Monte Carlo simulation...")
-
 
 input_variables <- read.csv("input_table_onion_final.csv", header = TRUE, sep = ";")
 
@@ -495,4 +493,4 @@ runtime <- system.time({
 cat("\n⏱️ Optimized simulation finished in",
     round(runtime["elapsed"], 2), "seconds (", 
     round(runtime["elapsed"]/60, 2), "minutes)\n")
-message("✅ Optimization complete!")
+
