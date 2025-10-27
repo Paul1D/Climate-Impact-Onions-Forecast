@@ -1,5 +1,5 @@
 ################################################################################
-# FAST Weather Preprocessing — minimal copies, pure R
+# FAST Weather Preprocessing — minimal copies
 ################################################################################
 
 process_weather_data <- function(
