@@ -24,21 +24,50 @@ load_if_needed(c(
 enableJIT(3)
 
 ################################################################################
-# Pre-compute phase indices
+# Pre-compute phase indices based on cumulative GDD (uses input-table variables)
 ################################################################################
-precompute_phase_data <- function(df, sow) {
-  last_y <- max(df$yday, na.rm = TRUE)
+
+precompute_phase_data <- function(df, sow,
+                                  GDD_field_emergence_required_p,
+                                  GDD_vegetative_required_p,
+                                  GDD_bulbing_required_p,
+                                  GDD_maturation_required_p) {
+  # df must contain columns: yday, GDD_daily
+  n <- nrow(df)
+  if (n == 0L) return(NULL)
+  
+  # Cumulative GDD since sowing
+  df[, GDD_cum := cumsum(
+    fifelse(yday >= sow, GDD_daily, 0)
+  )]
+  
+  # Phase boundaries (from input table)
+  gdd_em <- GDD_field_emergence_required_p
+  gdd_vg <- GDD_vegetative_required_p
+  gdd_bl <- GDD_bulbing_required_p
+  gdd_mt <- GDD_maturation_required_p
+  
+  # Logical indices for each growth stage
   list(
-    em = list(idx = df$yday >  sow & df$yday <= (sow + 15),
-              range = (sow + 1):min(sow + 15, last_y)),
-    vg = list(idx = df$yday > (sow + 15) & df$yday <= (sow + 50),
-              range = (sow + 16):min(sow + 50, last_y)),
-    bl = list(idx = df$yday > (sow + 50) & df$yday <= (sow + 90),
-              range = (sow + 51):min(sow + 90, last_y)),
-    mt = list(idx = df$yday > (sow + 90),
-              range = (sow + 91):last_y)
+    em = list(
+      idx   = df$GDD_cum <= gdd_em,
+      range = which(df$GDD_cum <= gdd_em)
+    ),
+    vg = list(
+      idx   = df$GDD_cum > gdd_em & df$GDD_cum <= gdd_vg,
+      range = which(df$GDD_cum > gdd_em & df$GDD_cum <= gdd_vg)
+    ),
+    bl = list(
+      idx   = df$GDD_cum > gdd_vg & df$GDD_cum <= gdd_bl,
+      range = which(df$GDD_cum > gdd_vg & df$GDD_cum <= gdd_bl)
+    ),
+    mt = list(
+      idx   = df$GDD_cum > gdd_bl & df$GDD_cum <= gdd_mt,
+      range = which(df$GDD_cum > gdd_bl & df$GDD_cum <= gdd_mt)
+    )
   )
 }
+
 
 ################################################################################
 # Batch risk computation (means & maxima computed once per phase)
@@ -50,8 +79,13 @@ compute_all_risks <- compiler::cmpfun(function(phase_data, df, params) {
     P   = mean(df$Prec[idx],    na.rm = TRUE),
     RH  = mean(df$RH_mean[idx], na.rm = TRUE),
     Ts  = mean(df$Ts_5cm[idx],  na.rm = TRUE),
-    wet = max(df$day_consec_wet[idx], na.rm = TRUE),
-    dry = max(df$day_consec_dry[idx], na.rm = TRUE)
+    wet = if (any(phase_data$em$idx, na.rm = TRUE))
+      max(df$day_consec_wet[phase_data$em$idx], na.rm = TRUE)
+    else 0,
+    dry = if (any(phase_data$em$idx, na.rm = TRUE))
+      max(df$day_consec_dry[phase_data$em$idx], na.rm = TRUE)
+    else 0
+    
   )
   
   ems <- stats_for(phase_data$em$idx)
@@ -351,7 +385,15 @@ onion_climate_impact <- compiler::cmpfun(function() {
     )
     
     # Phase masks
-    phase_data <- precompute_phase_data(df, sow)
+    phase_data <- precompute_phase_data(
+      df = df,
+      sow = sow,
+      GDD_field_emergence_required_p = GDD_field_emergence_required_p,
+      GDD_vegetative_required_p       = GDD_vegetative_required_p,
+      GDD_bulbing_required_p          = GDD_bulbing_required_p,
+      GDD_maturation_required_p       = GDD_maturation_required_p
+    )
+    
     
     # Risks in one call
     all_risks <- compute_all_risks(phase_data, df, params)
@@ -481,16 +523,10 @@ onion_climate_impact <- compiler::cmpfun(function() {
 
 input_variables <- read.csv("input_table_onion_final.csv", header = TRUE, sep = ";")
 
-runtime <- system.time({
-  onion_mc_simulation <- mcSimulation(
-    estimate = as.estimate(input_variables),
-    model_function = onion_climate_impact,
-    numberOfModelRuns = 1000,
-    functionSyntax = "plainNames"
-  )
-})
 
-cat("\n⏱️ Optimized simulation finished in",
-    round(runtime["elapsed"], 2), "seconds (", 
-    round(runtime["elapsed"]/60, 2), "minutes)\n")
+onion_mc_simulation <- mcSimulation(
+                       estimate = as.estimate(input_variables),
+                       model_function = onion_climate_impact,
+                       numberOfModelRuns = 1000,
+                       functionSyntax = "plainNames")
 

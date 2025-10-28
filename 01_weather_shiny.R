@@ -1,6 +1,28 @@
 ################################################################################
-# FAST Weather Preprocessing — minimal copies
+# FAST Weather Preprocessing 
 ################################################################################
+
+################################################################################
+
+
+load_if_needed <- function(pkgs) {
+  for (pkg in pkgs) {
+    if (!requireNamespace(pkg, quietly = TRUE)) {
+      install.packages(pkg, dependencies = TRUE)
+    }
+    suppressPackageStartupMessages(library(pkg, character.only = TRUE))
+  }
+}
+
+load_if_needed(c(
+  "zoo",
+  "RcppRoll",
+  "decisionSupport",
+  "compiler",
+  "data.table"
+))
+
+######################################################################
 
 process_weather_data <- function(
     file_path = "weather_koeln-bonn_processed_final_compressed.RDS",
@@ -39,6 +61,6 @@ process_weather_data <- function(
 
   weather_precomputed <- process_weather_data(
     file_path = "weather_koeln-bonn_processed_final.RDS",
-    base_temp = 5
+    base_temp = 5 
   )
 
