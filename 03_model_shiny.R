@@ -389,12 +389,12 @@ onion_climate_impact <- compiler::cmpfun(function() {
 # Monte Carlo Simulation
 ################################################################################
 
-input_variables <- read.csv("input_table_onion__xxx.csv", header = TRUE, sep = ";")
+input_variables <- read.csv("input_table_onion.csv", header = TRUE, sep = ";")
 
   onion_mc_simulation <- mcSimulation(
     estimate = as.estimate(input_variables),
     model_function = onion_climate_impact,
-    numberOfModelRuns = 100,
+    numberOfModelRuns = num_simulations_c,
     functionSyntax = "plainNames"
   )
 
