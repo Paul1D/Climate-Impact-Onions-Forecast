@@ -380,7 +380,7 @@ onion_climate_impact <- compiler::cmpfun(function() {
       m_fus_mt     = multipliers[21],
       m_mildew_mt  = multipliers[22]
       
-    )
+    ) 
   }
   
  return(results)
