@@ -27,7 +27,7 @@ load_if_needed(c(
 process_weather_data <- function(
     file_path = "weather_koeln-bonn_processed_final_compressed.RDS",
     scenarios = c("historical", "ssp126", "ssp245", "ssp370", "ssp585"),
-    base_temp = 5) {
+    base_temp = 1) {
   
   
   weather_combined <- readRDS(file_path)
@@ -61,6 +61,6 @@ process_weather_data <- function(
 
   weather_precomputed <- process_weather_data(
     file_path = "weather_koeln-bonn_processed_final.RDS",
-    base_temp = 5 
+    base_temp = 1
   )
 
