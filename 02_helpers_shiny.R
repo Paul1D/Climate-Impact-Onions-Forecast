@@ -169,7 +169,7 @@ helper_function <- function(attach_to_global = FALSE) {
                                                Tavg_hail_threshold_p,
                                                impact_days_hail_t) {
     hail_days <- sum(Prec >= prec_hail_threshold_p & Tavg >= Tavg_hail_threshold_p, na.rm = TRUE)
-    risk_hail <- 1 - exp(- (impact_days_hail_t / 2) * hail_days)
+    risk_hail <- 1 - exp(- (impact_days_hail_t) * hail_days)
     pmin(risk_hail, 1)
   })
   

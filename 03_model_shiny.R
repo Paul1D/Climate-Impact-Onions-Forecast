@@ -394,7 +394,7 @@ input_variables <- read.csv("input_table_onion.csv", header = TRUE, sep = ";")
   onion_mc_simulation <- mcSimulation(
     estimate = as.estimate(input_variables),
     model_function = onion_climate_impact,
-    numberOfModelRuns = num_simulations_c,
+    numberOfModelRuns = 100,
     functionSyntax = "plainNames"
   )
 
