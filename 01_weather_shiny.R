@@ -25,7 +25,7 @@ load_if_needed(c(
 ######################################################################
 
 process_weather_data <- function(
-    file_path = "weather_koeln-bonn_processed_final_compressed.RDS",
+    file_path = "weather_koeln-bonn_final_compressed.rds",
     scenarios = c("historical", "ssp126", "ssp245", "ssp370", "ssp585"),
     base_temp = 1) {
   
@@ -60,7 +60,8 @@ process_weather_data <- function(
 
 
   weather_precomputed <- process_weather_data(
-    file_path = "weather_koeln-bonn_processed_final.RDS",
+    file_path = "weather_koeln-bonn_final_compressed.rds",
     base_temp = 1
   )
-
+## Please explain better what the script actually does 
+# Give titles, structure it also give comments what every section does 
