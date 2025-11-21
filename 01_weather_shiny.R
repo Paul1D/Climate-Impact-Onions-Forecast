@@ -52,7 +52,7 @@ process_weather_data <- function(
   # Inside each scenario, further split by id_season but keep as shallow copies
   weather_precomputed <- lapply(weather_precomputed, function(dt) {
     split(dt, by = "id_season", keep.by = FALSE)
-  })a
+  })
   
   
   return(weather_precomputed)
