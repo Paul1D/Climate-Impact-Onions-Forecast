@@ -268,26 +268,29 @@ onion_climate_impact <- compiler::cmpfun(function() {
     
     all_risks <- compute_all_risks(phase_data, df, params)
     
-    multipliers <- c(
+    em_multipliers <- c(
       fast_chance_event(all_risks$em["drought"],  params$yield_reduction_drought_t),
       fast_chance_event(all_risks$em["exrain"],   params$yield_reduction_extreme_rain_t),
       fast_chance_event(all_risks$em["hail"],     params$yield_reduction_hail_t),
-      fast_chance_event(all_risks$em["fusarium"], params$yield_reduction_fusarium_t),
+      fast_chance_event(all_risks$em["fusarium"], params$yield_reduction_fusarium_t))
       
+    vg_multipliers <- c(
       fast_chance_event(all_risks$vg["drought"],  params$yield_reduction_drought_t),
       fast_chance_event(all_risks$vg["exrain"],   params$yield_reduction_extreme_rain_t),
       fast_chance_event(all_risks$vg["hail"],     params$yield_reduction_hail_t),
       fast_chance_event(all_risks$vg["fusarium"], params$yield_reduction_fusarium_t),
       fast_chance_event(all_risks$vg["mildew"],   params$yield_reduction_downy_mildew_t),
-      fast_chance_event(all_risks$vg["thrips"],   params$yield_reduction_thrips_t),
+      fast_chance_event(all_risks$vg["thrips"],   params$yield_reduction_thrips_t))
       
+      bl_multipliers <- c(
       fast_chance_event(all_risks$bl["drought"],  params$yield_reduction_drought_t),
       fast_chance_event(all_risks$bl["exrain"],   params$yield_reduction_extreme_rain_t),
       fast_chance_event(all_risks$bl["hail"],     params$yield_reduction_hail_t),
       fast_chance_event(all_risks$bl["botrytis"], params$yield_reduction_botrytis_t),
       fast_chance_event(all_risks$bl["fusarium"], params$yield_reduction_fusarium_t),
-      fast_chance_event(all_risks$bl["mildew"],   params$yield_reduction_downy_mildew_t),
+      fast_chance_event(all_risks$bl["mildew"],   params$yield_reduction_downy_mildew_t))
       
+      mt_multipliers <- c(
       fast_chance_event(all_risks$mt["drought"],  params$yield_reduction_drought_t),
       fast_chance_event(all_risks$mt["exrain"],   params$yield_reduction_extreme_rain_t),
       fast_chance_event(all_risks$mt["hail"],     params$yield_reduction_hail_t),
@@ -296,46 +299,61 @@ onion_climate_impact <- compiler::cmpfun(function() {
       fast_chance_event(all_risks$mt["mildew"],   params$yield_reduction_downy_mildew_t)
     )
     
-    combined_yield_multiplier <- prod(multipliers, na.rm = TRUE)
+    em_bio_multiplier <- prod(em_multipliers, na.rm = TRUE)
+    vg_bio_multiplier <- prod(vg_multipliers, na.rm = TRUE)
+    bl_bio_multiplier <- prod(bl_multipliers, na.rm = TRUE)
+    mt_bio_multiplier <- prod(mt_multipliers, na.rm = TRUE)
     
-    biomass_em <- sum(calc_bio_vectorized(
+    # potential biomass (no biotic/abiotic stress from your risk module)
+    biomass_em_pot <- sum(calc_bio_vectorized(
       df$PAR[phase_data$em$idx], params$LAI_emergence_p,
       df$Tavg[phase_data$em$idx], df$Prec[phase_data$em$idx],
       params$f_T_1_lower_p, params$f_T_1_upper_p,
       params$f_T_0_lower_p, params$f_T_0_upper_p,
       params$f_W_1_lower_p, params$f_W_1_upper_p,
-      params$f_W_0.5_p, params$LUE_onion_p, params$lec_k_c), na.rm = TRUE)
+      params$f_W_0.5_p, params$LUE_onion_p, params$lec_k_c
+    ), na.rm = TRUE)
     
-    biomass_vg <- sum(calc_bio_vectorized(
+    biomass_vg_pot <- sum(calc_bio_vectorized(
       df$PAR[phase_data$vg$idx], params$LAI_veg_p,
       df$Tavg[phase_data$vg$idx], df$Prec[phase_data$vg$idx],
       params$f_T_1_lower_p, params$f_T_1_upper_p,
       params$f_T_0_lower_p, params$f_T_0_upper_p,
       params$f_W_1_lower_p, params$f_W_1_upper_p,
-      params$f_W_0.5_p, params$LUE_onion_p, params$lec_k_c), na.rm = TRUE)
+      params$f_W_0.5_p, params$LUE_onion_p, params$lec_k_c
+    ), na.rm = TRUE)
     
-    biomass_bl <- sum(calc_bio_vectorized(
+    biomass_bl_pot <- sum(calc_bio_vectorized(
       df$PAR[phase_data$bl$idx], params$LAI_bulbing_p,
       df$Tavg[phase_data$bl$idx], df$Prec[phase_data$bl$idx],
       params$f_T_1_lower_p, params$f_T_1_upper_p,
       params$f_T_0_lower_p, params$f_T_0_upper_p,
       params$f_W_1_lower_p, params$f_W_1_upper_p,
-      params$f_W_0.5_p, params$LUE_onion_p, params$lec_k_c), na.rm = TRUE)
+      params$f_W_0.5_p, params$LUE_onion_p, params$lec_k_c
+    ), na.rm = TRUE)
     
-    biomass_mt <- sum(calc_bio_vectorized(
+    biomass_mt_pot <- sum(calc_bio_vectorized(
       df$PAR[phase_data$mt$idx], params$LAI_maturation_p,
       df$Tavg[phase_data$mt$idx], df$Prec[phase_data$mt$idx],
       params$f_T_1_lower_p, params$f_T_1_upper_p,
       params$f_T_0_lower_p, params$f_T_0_upper_p,
       params$f_W_1_lower_p, params$f_W_1_upper_p,
-      params$f_W_0.5_p, params$LUE_onion_p, params$lec_k_c), na.rm = TRUE)
+      params$f_W_0.5_p, params$LUE_onion_p, params$lec_k_c
+    ), na.rm = TRUE)
+    
+    # apply phase-specific stress scalars f_S^(phase)
+    biomass_em <- biomass_em_pot * em_bio_multiplier   # f_S(em)
+    biomass_vg <- biomass_vg_pot * vg_bio_multiplier   # f_S(vg)
+    biomass_bl <- biomass_bl_pot * bl_bio_multiplier   # f_S(bl)
+    biomass_mt <- biomass_mt_pot * mt_bio_multiplier   # f_S(mt)
+    potential_yield <- (biomass_em_pot+biomass_vg_pot+biomass_bl_pot+biomass_mt_pot) * params$onions_per_ha_p *
+                          (1 - params$dry_onion_weight_t) * params$HI_onions_t / 1e6
     
     total_biomass <- biomass_em + biomass_vg + biomass_bl + biomass_mt
     
-    raw_yield <- (total_biomass * params$onions_per_ha_p *
+    final_yield <- (total_biomass * params$onions_per_ha_p *
                     (1 - params$dry_onion_weight_t)) * params$HI_onions_t / 1e6
     
-    final_yield <- raw_yield * combined_yield_multiplier
     
     results[[sc]] <- list(
       sowing_yday = sow,
@@ -346,39 +364,42 @@ onion_climate_impact <- compiler::cmpfun(function() {
       }
       ,
       total_biomass = total_biomass,
-      raw_yield_per_ha = raw_yield,
+      raw_yield_per_ha = potential_yield,
       final_yield_per_ha = final_yield,
-      combined_yield_multiplier = combined_yield_multiplier,
+      em_bio_multiplier = em_bio_multiplier,
+      vg_bio_multiplier = vg_bio_multiplier,
+      bl_bio_multiplier = bl_bio_multiplier,
+      mt_bio_multiplier = mt_bio_multiplier,
       
       # expose multipliers for diagnostics
-      m_drought_em = multipliers[1],
-      m_exrain_em  = multipliers[2],
-      m_hail_em    = multipliers[3],
-      m_fus_em     = multipliers[4],
+      m_drought_em = em_multipliers[1],
+      m_exrain_em  = em_multipliers[2],
+      m_hail_em    = em_multipliers[3],
+      m_fus_em     = em_multipliers[4],
     
       
-      m_drought_vg = multipliers[5],
-      m_exrain_vg  = multipliers[6],
-      m_hail_vg    = multipliers[7],
-      m_fus_vg     = multipliers[8],
-      m_mildew_vg  = multipliers[9],
-      m_thrips_vg  = multipliers[10],
+      m_drought_vg = vg_multipliers[1],
+      m_exrain_vg  = vg_multipliers[2],
+      m_hail_vg    = vg_multipliers[3],
+      m_fus_vg     = vg_multipliers[4],
+      m_mildew_vg  = vg_multipliers[5],
+      m_thrips_vg  = vg_multipliers[6],
    
       
-      m_drought_bl = multipliers[11],
-      m_exrain_bl  = multipliers[12],
-      m_hail_bl    = multipliers[13],
-      m_botrytis_bl= multipliers[14],
-      m_fus_bl     = multipliers[15],
-      m_mildew_bl  = multipliers[16],
+      m_drought_bl = bl_multipliers[1],
+      m_exrain_bl  = bl_multipliers[2],
+      m_hail_bl    = bl_multipliers[3],
+      m_botrytis_bl= bl_multipliers[4],
+      m_fus_bl     = bl_multipliers[5],
+      m_mildew_bl  = bl_multipliers[6],
      
       
-      m_drought_mt = multipliers[17],
-      m_exrain_mt  = multipliers[18],
-      m_hail_mt    = multipliers[19],
-      m_botrytis_mt= multipliers[20],
-      m_fus_mt     = multipliers[21],
-      m_mildew_mt  = multipliers[22]
+      m_drought_mt = mt_multipliers[1],
+      m_exrain_mt  = mt_multipliers[2],
+      m_hail_mt    = mt_multipliers[3],
+      m_botrytis_mt= mt_multipliers[4],
+      m_fus_mt     = mt_multipliers[5],
+      m_mildew_mt  = mt_multipliers[6]
       
     )  
   }

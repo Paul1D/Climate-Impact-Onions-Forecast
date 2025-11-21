@@ -1,5 +1,7 @@
 ################################################################################
 # Helper Function load 
+
+# explain better , structure it --> make it udbnerstandable for outsiders 
 ###############################################################################
 
 load_if_needed <- function(pkgs) {
@@ -131,7 +133,7 @@ helper_function <- function(attach_to_global = FALSE) {
                                                   impact_rh_drought_t,
                                                   impact_days_dry_drought_t,
                                                   impact_temp_drought_t) {
-    # RH component (drier -> higher risk)
+     # RH component (drier -> higher risk)
     R_RH <- ifelse(RH_mean < rh_drought_threshold_p,
                    1 - exp(- (impact_rh_drought_t / 2) * (rh_drought_threshold_p - RH_mean)),
                    0)
