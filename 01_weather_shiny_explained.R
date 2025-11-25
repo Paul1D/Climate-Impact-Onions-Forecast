@@ -13,7 +13,7 @@
 # Load required packages ----
 
 load_if_needed <- function(pkgs) {
-  for (pkg in pkgs) {
+  for (pkg in pkgs) { 
     
     # Install package if it is not available
     if (!requireNamespace(pkg, quietly = TRUE)) {

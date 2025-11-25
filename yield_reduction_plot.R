@@ -12,7 +12,7 @@ make_yield_reduction_heatmap <- function(yield_red_long) {
   # 2) Ordered labels (codes -> German labels) --------------
   stress_labels <- c(
     # Keimphase (em)
-    "m_drought_em"  = "Dürre (Keimphase)",
+    "m_drought_em"  = "Dürre (Keimphase)", 
     "m_exrain_em"   = "Starkregen (Keimphase)",
     "m_hail_em"     = "Hagel (Keimphase)",
     "m_fus_em"      = "Fusarium (Keimphase)",

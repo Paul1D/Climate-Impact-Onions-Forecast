@@ -121,7 +121,7 @@ onion_yield_plot <- ggplot(
     legend.title = element_blank(),
     legend.position = "right",
     strip.background = element_rect(fill = "lightgrey"),
-    strip.text = element_text(size = 12, face = "bold")
+    strip.text = element_text(size = 12, face = "bold") 
   ) +
   scale_x_discrete(name = "Klimaszenario") +
   scale_y_continuous(name = "Zwiebel-Ertrag [t/ha]") +

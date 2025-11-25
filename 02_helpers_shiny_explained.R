@@ -18,7 +18,7 @@
 #     - get_drought_stress()
 #     - get_extreme_rain_stress()
 #     - get_hail_stress()
-#     - get_botrytis_stress()
+#     - get_botrytis_stress() 
 #     - get_downy_mildew_stress()
 #     - get_fusarium_stress()
 #     - get_thrips_stress()
