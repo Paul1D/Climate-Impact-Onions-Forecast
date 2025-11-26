@@ -239,54 +239,68 @@ helper_function <- function(attach_to_global = FALSE) {
   })
   
   # Botrytis stress: high RH, many wet days, suitable T range
-  get_botrytis_stress <- compiler::cmpfun(function(Tavg,
-                                                   RH_mean,
+  
+  get_botrytis_stress <- compiler::cmpfun(function(Tmin,      
+                                                   RH_max,   
                                                    days_consec_wet,
                                                    rh_botrytis_threshold_p,
                                                    impact_rh_botrytis_t,
                                                    impact_days_wet_botrytis_t,
                                                    Topt_botrytis_p,
                                                    Twidth_botrytis_p) {
+
+    
+    # 1) Luftfeuchte-Gate: ohne sehr hohe RH kein Risiko
     R_H <- ifelse(
-      RH_mean >= rh_botrytis_threshold_p,
-      1 - exp(- (impact_rh_botrytis_t / 2) * (RH_mean - rh_botrytis_threshold_p)),
+      RH_max >= rh_botrytis_threshold_p,  # z.B. 90%
+      1 - exp(- (impact_rh_botrytis_t / 2) * (RH_max - rh_botrytis_threshold_p)),
       0
     )
     R_H <- pmin(R_H, 1)
     
+    # 2) length of wet period 
     R_D <- 1 - exp(- (impact_days_wet_botrytis_t / 2) * days_consec_wet)
     R_D <- pmin(R_D, 1)
     
-    R_T <- exp(- (Tavg - Topt_botrytis_p)^2 / (2 * Twidth_botrytis_p^2))
+    # 3) Temperature during the night
+    R_T <- exp(- (Tmin - Topt_botrytis_p)^2 / (2 * Twidth_botrytis_p^2))
     R_T <- pmin(R_T, 1)
     
+    # 4) Gesamt-Risiko
     pmin(R_H * R_D * R_T, 1)
   })
   
+  
   # Downy mildew stress: similar structure, different parameters
-  get_downy_mildew_stress <- compiler::cmpfun(function(Tavg,
-                                                       RH_mean,
+  get_downy_mildew_stress <- compiler::cmpfun(function(Tmin,
+                                                       RH_max,   
                                                        days_consec_wet,
                                                        rh_mildew_threshold_p,
                                                        impact_rh_mildew_t,
                                                        impact_days_wet_mildew_t,
                                                        Topt_mildew_p,
                                                        Twidth_mildew_p) {
+  
+    
+    # 1) High RH required 
     R_H <- ifelse(
-      RH_mean >= rh_mildew_threshold_p,
-      1 - exp(- (impact_rh_mildew_t / 2) * (RH_mean - rh_mildew_threshold_p)),
+      RH_max >= rh_mildew_threshold_p,
+      1 - exp(- (impact_rh_mildew_t / 2) * (RH_max - rh_mildew_threshold_p)),
       0
     )
     R_H <- pmin(R_H, 1)
     
+    # 2) amount of wet days--> therefore wet nights
     R_D <- 1 - exp(- (impact_days_wet_mildew_t / 2) * days_consec_wet)
     R_D <- pmin(R_D, 1)
     
-    R_T <- exp(- (Tavg - Topt_mildew_p)^2 / (2 * Twidth_mildew_p^2))
+    # 3) Temperature optimum during the night 
+    R_T <- exp(- (Tmin - Topt_mildew_p)^2 / (2 * Twidth_mildew_p^2))
     R_T <- pmin(R_T, 1)
     
     pmin(R_H * R_D * R_T, 1)
   })
+  
   
   # Fusarium stress: soil T + RH + wet days
   get_fusarium_stress <- compiler::cmpfun(function(Ts_5cm,

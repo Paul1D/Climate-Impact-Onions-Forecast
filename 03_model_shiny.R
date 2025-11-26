@@ -10,18 +10,15 @@
 # 3. Defines a function `compute_all_risks()` that:
 #      - aggregates weather (T, RH, rain, soil T, wet/dry streaks) by phase
 #      - computes phase-level risk scores for drought, extreme rain, hail,
-#        Botrytis, downy mildew, Fusarium, and thrips using functions.
-# 4. Calls `helper_function(attach_to_global = TRUE)` to load all stress and
-#    biomass helpers from the helper script.
+#        Botrytis, downy mildew, Fusarium, and thrips.
+# 4. Loads all helper functions (stress + biomass + sowing).
 # 5. Defines the main model function `onion_climate_impact()`:
-#      - samples one season per scenario from `weather_precomputed`
+#      - samples one season per scenario
 #      - computes sowing date
-#      - computes phase-wise risks and resulting biomass multipliers
-#      - computes potential vs stressed biomass and yield
-#      - returns results per scenario (historical, ssp126, ssp245, ssp370, ssp585)
-# 6. Runs a Monte Carlo simulation via `mcSimulation()` using decisionSupport.
+#      - computes stress risks and biomass multipliers
+#      - computes potential vs realized yield
+# 6. Runs Monte Carlo simulation.
 
- 
 
 # Load required packages ----
 
@@ -49,7 +46,6 @@ compiler::enableJIT(3)
 
 
 # Phase definition via cumulative GDD ----
-
 # Pre-compute which days belong to which growth phase (em, vg, bl, mt)
 # using cumulative Growing Degree Days (GDD) after sowing.
 precompute_phase_data <- compiler::cmpfun(function(df, sow,
@@ -62,22 +58,18 @@ precompute_phase_data <- compiler::cmpfun(function(df, sow,
   
   # Initialize cumulative GDD
   df[, GDD_cum := 0]
-  
   # Only accumulate after sowing
   after_sow <- df$yday >= sow
   df$GDD_cum[after_sow] <- cumsum(df$GDD_daily[after_sow])
   
   # Phase thresholds (GDD-based)
-  gdd_em <- GDD_field_emergence_required_p
-  gdd_vg <- GDD_vegetative_required_p
-  gdd_bl <- GDD_bulbing_required_p
-  gdd_mt <- GDD_maturation_required_p
-  
-  # Logical indices for each phase
-  em_idx <- after_sow & df$GDD_cum <= gdd_em
-  vg_idx <- after_sow & df$GDD_cum > gdd_em & df$GDD_cum <= gdd_vg
-  bl_idx <- after_sow & df$GDD_cum > gdd_vg & df$GDD_cum <= gdd_bl
-  mt_idx <- after_sow & df$GDD_cum > gdd_bl & df$GDD_cum <= gdd_mt
+  em_idx <- after_sow & df$GDD_cum <= GDD_field_emergence_required_p
+  vg_idx <- after_sow & df$GDD_cum > GDD_field_emergence_required_p &
+    df$GDD_cum <= GDD_vegetative_required_p
+  bl_idx <- after_sow & df$GDD_cum > GDD_vegetative_required_p &
+    df$GDD_cum <= GDD_bulbing_required_p
+  mt_idx <- after_sow & df$GDD_cum > GDD_bulbing_required_p &
+    df$GDD_cum <= GDD_maturation_required_p
   
   list(
     em = list(idx = em_idx, range = which(em_idx)),
@@ -91,17 +83,18 @@ precompute_phase_data <- compiler::cmpfun(function(df, sow,
 # Batch risk computation per phase ----
 
 # Compute all stress risks per phase (em, vg, bl, mt) in one go.
-# Uses phase means (T, RH, soil T, rain) and maximum wet/dry streaks.
+# Uses phase means (T, RH, soil T, rain) and maximum wet/dry streaks
 compute_all_risks <- compiler::cmpfun(function(phase_data, df, params) {
-  
+ 
   # Helper to compute phase-level summary statistics
   stats_for <- function(idx) list(
-    T   = mean(df$Tavg[idx],    na.rm = TRUE),
-    P   = mean(df$Prec[idx],    na.rm = TRUE),
-    RH  = mean(df$RH_mean[idx], na.rm = TRUE),
-    Ts  = mean(df$Ts_5cm[idx],  na.rm = TRUE),
-    wet = if (any(idx, na.rm = TRUE)) max(df$day_consec_wet[idx], na.rm = TRUE) else 0,
-    dry = if (any(idx, na.rm = TRUE)) max(df$day_consec_dry[idx], na.rm = TRUE) else 0
+    T        = mean(df$Tavg[idx],    na.rm = TRUE),
+    Tmin     = mean(df$Tmin[idx],    na.rm = TRUE),   # nighttime temp proxy
+    RHmean   = mean(df$RH_mean[idx], na.rm = TRUE),
+    RHmax    = mean(df$RH_max[idx],  na.rm = TRUE),   # nighttime humidity proxy
+    Ts       = mean(df$Ts_5cm[idx],  na.rm = TRUE),
+    wet      = if (any(idx, na.rm = TRUE)) max(df$day_consec_wet[idx]) else 0,
+    dry      = if (any(idx, na.rm = TRUE)) max(df$day_consec_dry[idx]) else 0
   )
   
   ems <- stats_for(phase_data$em$idx)
@@ -112,119 +105,158 @@ compute_all_risks <- compiler::cmpfun(function(phase_data, df, params) {
   # --- EMERGENCE phase risks ---
   risks_em <- c(
     drought = get_drought_stress(
-      ems$T, ems$RH, ems$dry,
+      ems$T, ems$RHmean, ems$dry,
       params$rh_drought_threshold_p, params$Tavg_drought_threshold_p,
-      params$impact_rh_drought_t, params$impact_days_dry_drought_t, params$impact_temp_drought_t
+      params$impact_rh_drought_t, params$impact_days_dry_drought_t,
+      params$impact_temp_drought_t
     ),
     exrain = get_extreme_rain_stress(
       df$Prec[phase_data$em$idx],
-      params$prec_extreme_rain_medium_p, params$prec_extreme_rain_high_p,
+      params$prec_extreme_rain_medium_p,
+      params$prec_extreme_rain_high_p,
       params$impact_days_extreme_rain_t
     ),
     hail = get_hail_stress(
       df$Tavg[phase_data$em$idx], df$Prec[phase_data$em$idx],
-      params$prec_hail_threshold_p, params$Tavg_hail_threshold_p, params$impact_days_hail_t
+      params$prec_hail_threshold_p, params$Tavg_hail_threshold_p,
+      params$impact_days_hail_t
     ),
     fusarium = get_fusarium_stress(
-      ems$Ts, ems$RH, ems$wet,
-      params$rh_fusarium_threshold_p, params$impact_rh_fusarium_t,
-      params$impact_days_wet_fusarium_t, params$Tsopt_fusarium_p, params$Tswidth_fusarium_p
+      ems$Ts, ems$RHmean, ems$wet,
+      params$rh_fusarium_threshold_p,
+      params$impact_rh_fusarium_t,
+      params$impact_days_wet_fusarium_t,
+      params$Tsopt_fusarium_p,
+      params$Tswidth_fusarium_p
     )
   )
   
   # --- VEGETATIVE phase risks ---
   risks_vg <- c(
     drought = get_drought_stress(
-      vgs$T, vgs$RH, vgs$dry,
+      vgs$T, vgs$RHmean, vgs$dry,
       params$rh_drought_threshold_p, params$Tavg_drought_threshold_p,
-      params$impact_rh_drought_t, params$impact_days_dry_drought_t, params$impact_temp_drought_t
+      params$impact_rh_drought_t, params$impact_days_dry_drought_t,
+      params$impact_temp_drought_t
     ),
     exrain = get_extreme_rain_stress(
       df$Prec[phase_data$vg$idx],
-      params$prec_extreme_rain_medium_p, params$prec_extreme_rain_high_p,
+      params$prec_extreme_rain_medium_p,
+      params$prec_extreme_rain_high_p,
       params$impact_days_extreme_rain_t
     ),
     hail = get_hail_stress(
       df$Tavg[phase_data$vg$idx], df$Prec[phase_data$vg$idx],
-      params$prec_hail_threshold_p, params$Tavg_hail_threshold_p, params$impact_days_hail_t
+      params$prec_hail_threshold_p, params$Tavg_hail_threshold_p,
+      params$impact_days_hail_t
     ),
     mildew = get_downy_mildew_stress(
-      vgs$T, vgs$RH, vgs$wet,
-      params$rh_mildew_threshold_p, params$impact_rh_mildew_t,
-      params$impact_days_wet_mildew_t, params$Topt_mildew_p, params$Twidth_mildew_p
+      vgs$Tmin, vgs$RHmax, vgs$wet,
+      params$rh_mildew_threshold_p,
+      params$impact_rh_mildew_t,
+      params$impact_days_wet_mildew_t,
+      params$Topt_mildew_p,
+      params$Twidth_mildew_p
     ),
     thrips = get_thrips_stress(
-      vgs$T, vgs$RH, vgs$dry,
-      params$rh_thrips_threshold_p, params$Topt_thrips_p, params$Twidth_thrips_p,
-      params$impact_rh_thrips_t, params$impact_days_dry_thrips_t
+      vgs$T, vgs$RHmean, vgs$dry,
+      params$rh_thrips_threshold_p,
+      params$Topt_thrips_p,
+      params$Twidth_thrips_p,
+      params$impact_rh_thrips_t,
+      params$impact_days_dry_thrips_t
     ),
     fusarium = get_fusarium_stress(
-      vgs$Ts, vgs$RH, vgs$wet,
-      params$rh_fusarium_threshold_p, params$impact_rh_fusarium_t,
-      params$impact_days_wet_fusarium_t, params$Tsopt_fusarium_p, params$Tswidth_fusarium_p
+      vgs$Ts, vgs$RHmean, vgs$wet,
+      params$rh_fusarium_threshold_p,
+      params$impact_rh_fusarium_t,
+      params$impact_days_wet_fusarium_t,
+      params$Tsopt_fusarium_p,
+      params$Tswidth_fusarium_p
     )
   )
   
   # --- BULBING phase risks ---
   risks_bl <- c(
     drought = get_drought_stress(
-      bls$T, bls$RH, bls$dry,
+      bls$T, bls$RHmean, bls$dry,
       params$rh_drought_threshold_p, params$Tavg_drought_threshold_p,
-      params$impact_rh_drought_t, params$impact_days_dry_drought_t, params$impact_temp_drought_t
+      params$impact_rh_drought_t, params$impact_days_dry_drought_t,
+      params$impact_temp_drought_t
     ),
     botrytis = get_botrytis_stress(
-      bls$T, bls$RH, bls$wet,
-      params$rh_botrytis_threshold_p, params$impact_rh_botrytis_t,
-      params$impact_days_wet_botrytis_t, params$Topt_botrytis_p, params$Twidth_botrytis_p
+      bls$Tmin, bls$RHmax, bls$wet,
+      params$rh_botrytis_threshold_p,
+      params$impact_rh_botrytis_t,
+      params$impact_days_wet_botrytis_t,
+      params$Topt_botrytis_p,
+      params$Twidth_botrytis_p
     ),
     mildew = get_downy_mildew_stress(
-      bls$T, bls$RH, bls$wet,
-      params$rh_mildew_threshold_p, params$impact_rh_mildew_t,
-      params$impact_days_wet_mildew_t, params$Topt_mildew_p, params$Twidth_mildew_p
+      bls$Tmin, bls$RHmax, bls$wet,
+      params$rh_mildew_threshold_p,
+      params$impact_rh_mildew_t,
+      params$impact_days_wet_mildew_t,
+      params$Topt_mildew_p,
+      params$Twidth_mildew_p
     ),
     fusarium = get_fusarium_stress(
-      bls$Ts, bls$RH, bls$wet,
-      params$rh_fusarium_threshold_p, params$impact_rh_fusarium_t,
-      params$impact_days_wet_fusarium_t, params$Tsopt_fusarium_p, params$Tswidth_fusarium_p
+      bls$Ts, bls$RHmean, bls$wet,
+      params$rh_fusarium_threshold_p,
+      params$impact_rh_fusarium_t,
+      params$impact_days_wet_fusarium_t,
+      params$Tsopt_fusarium_p,
+      params$Tswidth_fusarium_p
     )
   )
   
   # --- MATURATION phase risks ---
   risks_mt <- c(
     drought = get_drought_stress(
-      mts$T, mts$RH, mts$dry,
+      mts$T, mts$RHmean, mts$dry,
       params$rh_drought_threshold_p, params$Tavg_drought_threshold_p,
-      params$impact_rh_drought_t, params$impact_days_dry_drought_t, params$impact_temp_drought_t
+      params$impact_rh_drought_t, params$impact_days_dry_drought_t,
+      params$impact_temp_drought_t
     ),
     exrain = get_extreme_rain_stress(
       df$Prec[phase_data$mt$idx],
-      params$prec_extreme_rain_medium_p, params$prec_extreme_rain_high_p,
+      params$prec_extreme_rain_medium_p,
+      params$prec_extreme_rain_high_p,
       params$impact_days_extreme_rain_t
     ),
     hail = get_hail_stress(
       df$Tavg[phase_data$mt$idx], df$Prec[phase_data$mt$idx],
-      params$prec_hail_threshold_p, params$Tavg_hail_threshold_p, params$impact_days_hail_t
+      params$prec_hail_threshold_p, params$Tavg_hail_threshold_p,
+      params$impact_days_hail_t
     ),
     botrytis = get_botrytis_stress(
-      mts$T, mts$RH, mts$wet,
-      params$rh_botrytis_threshold_p, params$impact_rh_botrytis_t,
-      params$impact_days_wet_botrytis_t, params$Topt_botrytis_p, params$Twidth_botrytis_p
+      mts$Tmin, mts$RHmax, mts$wet,
+      params$rh_botrytis_threshold_p,
+      params$impact_rh_botrytis_t,
+      params$impact_days_wet_botrytis_t,
+      params$Topt_botrytis_p,
+      params$Twidth_botrytis_p
     ),
     fusarium = get_fusarium_stress(
-      mts$Ts, mts$RH, mts$wet,
-      params$rh_fusarium_threshold_p, params$impact_rh_fusarium_t,
-      params$impact_days_wet_fusarium_t, params$Tsopt_fusarium_p, params$Tswidth_fusarium_p
+      mts$Ts, mts$RHmean, mts$wet,
+      params$rh_fusarium_threshold_p,
+      params$impact_rh_fusarium_t,
+      params$impact_days_wet_fusarium_t,
+      params$Tsopt_fusarium_p,
+      params$Tswidth_fusarium_p
     ),
     mildew = get_downy_mildew_stress(
-      mts$T, mts$RH, mts$wet,
-      params$rh_mildew_threshold_p, params$impact_rh_mildew_t,
-      params$impact_days_wet_mildew_t, params$Topt_mildew_p, params$Twidth_mildew_p
+      mts$Tmin, mts$RHmax, mts$wet,
+      params$rh_mildew_threshold_p,
+      params$impact_rh_mildew_t,
+      params$impact_days_wet_mildew_t,
+      params$Topt_mildew_p,
+      params$Twidth_mildew_p
     )
   )
   
   list(em = risks_em, vg = risks_vg, bl = risks_bl, mt = risks_mt)
 })
-
 
 # Load compiled helper functions (stress + biomass + sowing) ----
 
@@ -232,7 +264,7 @@ compute_all_risks <- compiler::cmpfun(function(phase_data, df, params) {
 helper_function(attach_to_global = TRUE)
 
 
-# Main onion climate model function ----
+# MAIN MODEL FUNCTION ----------------------------------------------------
 
 onion_climate_impact <- compiler::cmpfun(function() {
   
@@ -243,7 +275,7 @@ onion_climate_impact <- compiler::cmpfun(function() {
   
   # 2) Bundle parameters into a single list for passing around ----
   params <- list(
-    # --- Sowing
+    # sowing
     T_soil_min_sowing_p        = T_soil_min_sowing_p,
     warm_days_needed_sowing_p  = warm_days_needed_sowing_p,
     frost_buffer_days_sowing_p = frost_buffer_days_sowing_p,
@@ -253,52 +285,52 @@ onion_climate_impact <- compiler::cmpfun(function() {
     rain_sum_max_mm_sowing_p   = rain_sum_max_mm_sowing_p,
     min_dry_days_sowing_c      = min_dry_days_sowing_c,
     
-    # --- Drought
+    # drought
     rh_drought_threshold_p     = rh_drought_threshold_p,
     Tavg_drought_threshold_p   = Tavg_drought_threshold_p,
     impact_rh_drought_t        = impact_rh_drought_t,
     impact_days_dry_drought_t  = impact_days_dry_drought_t,
     impact_temp_drought_t      = impact_temp_drought_t,
     
-    # --- Extreme rainfall
+    # extreme rain
     prec_extreme_rain_medium_p = prec_extreme_rain_medium_p,
     prec_extreme_rain_high_p   = prec_extreme_rain_high_p,
     impact_days_extreme_rain_t = impact_days_extreme_rain_t,
     
-    # --- Hail
+    # hail
     prec_hail_threshold_p      = prec_hail_threshold_p,
     Tavg_hail_threshold_p      = Tavg_hail_threshold_p,
     impact_days_hail_t         = impact_days_hail_t,
     
-    # --- Botrytis
+    # botrytis
     rh_botrytis_threshold_p    = rh_botrytis_threshold_p,
     impact_rh_botrytis_t       = impact_rh_botrytis_t,
     impact_days_wet_botrytis_t = impact_days_wet_botrytis_t,
     Topt_botrytis_p            = Topt_botrytis_p,
     Twidth_botrytis_p          = Twidth_botrytis_p,
     
-    # --- Mildew
+    # mildew
     rh_mildew_threshold_p      = rh_mildew_threshold_p,
     impact_rh_mildew_t         = impact_rh_mildew_t,
     impact_days_wet_mildew_t   = impact_days_wet_mildew_t,
     Topt_mildew_p              = Topt_mildew_p,
     Twidth_mildew_p            = Twidth_mildew_p,
     
-    # --- Thrips
+    # thrips
     rh_thrips_threshold_p      = rh_thrips_threshold_p,
     Topt_thrips_p              = Topt_thrips_p,
     Twidth_thrips_p            = Twidth_thrips_p,
     impact_rh_thrips_t         = impact_rh_thrips_t,
     impact_days_dry_thrips_t   = impact_days_dry_thrips_t,
     
-    # --- Fusarium
+    # fusarium
     rh_fusarium_threshold_p    = rh_fusarium_threshold_p,
     impact_rh_fusarium_t       = impact_rh_fusarium_t,
     impact_days_wet_fusarium_t = impact_days_wet_fusarium_t,
     Tsopt_fusarium_p           = Tsopt_fusarium_p,
     Tswidth_fusarium_p         = Tswidth_fusarium_p,
     
-    # --- Yield reductions (fractional impact if event happens)
+    # yield losses
     yield_reduction_drought_t       = yield_reduction_drought_t,
     yield_reduction_extreme_rain_t  = yield_reduction_extreme_rain_t,
     yield_reduction_hail_t          = yield_reduction_hail_t,
@@ -307,11 +339,12 @@ onion_climate_impact <- compiler::cmpfun(function() {
     yield_reduction_downy_mildew_t  = yield_reduction_downy_mildew_t,
     yield_reduction_thrips_t        = yield_reduction_thrips_t,
     
-    # --- Biomass / yield / canopy
+    # biomass
     LAI_emergence_p = (leaf_area_em_per_plant_p / 10000) * (onions_per_ha_p / 10000),
-    LAI_veg_p       = (leaf_area_em_per_plant_p / 10000) * (onions_per_ha_p / 10000),
-    LAI_bulbing_p   = (leaf_area_em_per_plant_p / 10000) * (onions_per_ha_p / 10000),
-    LAI_maturation_p= (leaf_area_em_per_plant_p  / 10000)* (onions_per_ha_p / 10000),
+    LAI_veg_p       = (leaf_area_veg_per_plant_p / 10000) * (onions_per_ha_p / 10000),
+    LAI_bulbing_p   = (leaf_area_bl_per_plant_p / 10000) * (onions_per_ha_p / 10000),
+    LAI_maturation_p= (leaf_area_mt_per_plant_p / 10000) * (onions_per_ha_p / 10000),
+    
     f_T_1_lower_p   = f_T_1_lower_p,
     f_T_1_upper_p   = f_T_1_upper_p,
     f_T_0_lower_p   = f_T_0_lower_p,
@@ -319,6 +352,7 @@ onion_climate_impact <- compiler::cmpfun(function() {
     f_W_1_lower_p   = f_W_1_lower_p,
     f_W_1_upper_p   = f_W_1_upper_p,
     f_W_0.5_p       = f_W_0.5_p,
+    
     LUE_onion_p     = LUE_onion_p,
     lec_k_c         = lec_k_c,
     onions_per_ha_p = onions_per_ha_p,
@@ -326,14 +360,14 @@ onion_climate_impact <- compiler::cmpfun(function() {
     HI_onions_t        = HI_onions_t
   )
   
-  # 3) Prepare result container per scenario ----
   results <- vector("list", length(weather_scenario_list))
   names(results) <- names(weather_scenario_list)
   
   # 4) Loop over scenarios ----
   for (sc in names(weather_scenario_list)) {
+    
     df <- weather_scenario_list[[sc]]
-    data.table::setDT(df)
+    setDT(df)
     
     # Derived streak variables (wet / dry days)
     df$day_consec_wet <- consec_counter(!is.na(df$Prec) & df$Prec > 0)
@@ -351,8 +385,10 @@ onion_climate_impact <- compiler::cmpfun(function() {
     # Phase data (em, vg, bl, mt) based on cumulative GDD
     phase_data <- precompute_phase_data(
       df, sow,
-      GDD_field_emergence_required_p, GDD_vegetative_required_p,
-      GDD_bulbing_required_p, GDD_maturation_required_p
+      GDD_field_emergence_required_p,
+      GDD_vegetative_required_p,
+      GDD_bulbing_required_p,
+      GDD_maturation_required_p
     )
     
     # Phase-wise risk scores
@@ -397,12 +433,13 @@ onion_climate_impact <- compiler::cmpfun(function() {
       fast_chance_event(all_risks$mt["fusarium"], params$yield_reduction_fusarium_t),
       fast_chance_event(all_risks$mt["mildew"],   params$yield_reduction_downy_mildew_t)
     )
-    
+
     # Phase-wise biomass multipliers (product of individual stress effects)
-    em_bio_multiplier <- prod(em_multipliers, na.rm = TRUE)
-    vg_bio_multiplier <- prod(vg_multipliers, na.rm = TRUE)
-    bl_bio_multiplier <- prod(bl_multipliers, na.rm = TRUE)
-    mt_bio_multiplier <- prod(mt_multipliers, na.rm = TRUE)
+    em_bio_multiplier <- prod(em_multipliers)
+    vg_bio_multiplier <- prod(vg_multipliers)
+    bl_bio_multiplier <- prod(bl_multipliers)
+    mt_bio_multiplier <- prod(mt_multipliers)
+    
     
     # 6) Compute potential biomass (without stress) per phase ----
     
@@ -413,7 +450,7 @@ onion_climate_impact <- compiler::cmpfun(function() {
       params$f_T_0_lower_p, params$f_T_0_upper_p,
       params$f_W_1_lower_p, params$f_W_1_upper_p,
       params$f_W_0.5_p, params$LUE_onion_p, params$lec_k_c
-    ), na.rm = TRUE)
+    ))
     
     biomass_vg_pot <- sum(calc_bio_vectorized(
       df$PAR[phase_data$vg$idx], params$LAI_veg_p,
@@ -422,7 +459,7 @@ onion_climate_impact <- compiler::cmpfun(function() {
       params$f_T_0_lower_p, params$f_T_0_upper_p,
       params$f_W_1_lower_p, params$f_W_1_upper_p,
       params$f_W_0.5_p, params$LUE_onion_p, params$lec_k_c
-    ), na.rm = TRUE)
+    ))
     
     biomass_bl_pot <- sum(calc_bio_vectorized(
       df$PAR[phase_data$bl$idx], params$LAI_bulbing_p,
@@ -431,7 +468,7 @@ onion_climate_impact <- compiler::cmpfun(function() {
       params$f_T_0_lower_p, params$f_T_0_upper_p,
       params$f_W_1_lower_p, params$f_W_1_upper_p,
       params$f_W_0.5_p, params$LUE_onion_p, params$lec_k_c
-    ), na.rm = TRUE)
+    ))
     
     biomass_mt_pot <- sum(calc_bio_vectorized(
       df$PAR[phase_data$mt$idx], params$LAI_maturation_p,
@@ -440,42 +477,39 @@ onion_climate_impact <- compiler::cmpfun(function() {
       params$f_T_0_lower_p, params$f_T_0_upper_p,
       params$f_W_1_lower_p, params$f_W_1_upper_p,
       params$f_W_0.5_p, params$LUE_onion_p, params$lec_k_c
-    ), na.rm = TRUE)
+    ))
     
     # 7) Apply stress multipliers to potential biomass ----
-    
     biomass_em <- biomass_em_pot * em_bio_multiplier
     biomass_vg <- biomass_vg_pot * vg_bio_multiplier
     biomass_bl <- biomass_bl_pot * bl_bio_multiplier
     biomass_mt <- biomass_mt_pot * mt_bio_multiplier
     
     # 8) Biomass  (g DM / m²) ----
-    potential_biomass_g_m2 <- biomass_em_pot + biomass_vg_pot + biomass_bl_pot + biomass_mt_pot
-    realized_biomass_g_m2  <- biomass_em     + biomass_vg     + biomass_bl     + biomass_mt
-    
-    # g/m² -> t/ha
-    # 1 g/m² = 0.01 t/ha
+    potential_biomass_g_m2 <- biomass_em_pot + biomass_vg_pot +
+      biomass_bl_pot + biomass_mt_pot
+    realized_biomass_g_m2  <- biomass_em + biomass_vg +
+      biomass_bl + biomass_mt
     
     potential_biomass_t_ha <- potential_biomass_g_m2 * 0.01
     realized_biomass_t_ha  <- realized_biomass_g_m2  * 0.01
     
-    # 10) Ertrag (Trockenmasse) [t/ha] mittels Harvest Index
     potential_yield_DM_t_ha <- potential_biomass_t_ha * params$HI_onions_t
     final_yield_DM_t_ha     <- realized_biomass_t_ha  * params$HI_onions_t
     
-
+    # 10) Ertrag (Trockenmasse) [t/ha] mittels Harvest Index
     potential_yield <- potential_yield_DM_t_ha
     final_yield     <- final_yield_DM_t_ha
-    
     
     # biomass -> g DM / m² (Summe)
     # PAR: MJ m^-2 d^-1
     # LUE_onion_p: g DM MJ^-1
     # calc_bio_vectorized -> g DM m^-2 d^-1
     
- 
     
-    # Harvest yday: last day in maturation phase, or last day after sowing
+    
+    # HARVEST DAY ------------------------------------------------------
+    
     after_sow_idx <- df$yday >= sow
     harvest_yday <- if (any(phase_data$mt$idx)) {
       max(df$yday[phase_data$mt$idx])
@@ -495,7 +529,6 @@ onion_climate_impact <- compiler::cmpfun(function() {
       bl_bio_multiplier  = bl_bio_multiplier,
       mt_bio_multiplier  = mt_bio_multiplier,
       
-      # Expose individual event multipliers for diagnostics (per phase)
       m_drought_em = em_multipliers[1],
       m_exrain_em  = em_multipliers[2],
       m_hail_em    = em_multipliers[3],
@@ -528,7 +561,7 @@ onion_climate_impact <- compiler::cmpfun(function() {
 })
 
 
-# Monte Carlo simulation with decisionSupport ----
+# Monte Carlo simulation ----
 
 input_variables <- read.csv("input_table_onion.csv", header = TRUE, sep = ";")
 
