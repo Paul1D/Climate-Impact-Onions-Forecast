@@ -43,7 +43,7 @@ process_weather_data <- function(
     scenarios = c("historical", "ssp126", "ssp245", "ssp370", "ssp585"),
     base_temp = 1
 ) {
-  # 1) Read and convert to data.table
+  # 1) Read and convert to data.table ----------------------------------------
   weather_combined <- readRDS(file_path)
   data.table::setDT(weather_combined)  # in-place conversion
   
