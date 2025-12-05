@@ -11,13 +11,16 @@
 #     - fast_chance_event(): simple stochastic gate (legacy)
 #     - expected_loss()    : risk × loss_fraction, in [0,1]
 #
+#   NOTE (legacy information, kept for documentation):
 #   Sowing rule:
 #     - compute_onion_sowing_yday_fast(): discover sowing DOY from weather
+#       -> this function is **not** included in this version as requested.
 #
 #   Stress modules:
-#     - get_drought_stress()
+#     - get_drought_stress()       [legacy – removed in this version as requested]
 #     - get_extreme_rain_stress()
 #     - get_hail_stress()
+#     - get_heat_stress()          [defined, but not yet used in the main model]
 #     - get_botrytis_stress() 
 #     - get_downy_mildew_stress()
 #     - get_fusarium_stress()
@@ -28,8 +31,8 @@
 #
 # At the end, helper_function(attach_to_global = TRUE) is called so that all
 # helpers are available by name in the global environment.
-# All functions are based on inputs from the weather data file. Threshholds, impact factors and optimums are defined in the input table.
-
+# All functions are based on inputs from the weather data file. Threshholds,
+# impact factors and optimums are defined in the input table.
 
 
 # Load required packages ----
@@ -100,110 +103,26 @@ helper_function <- function(attach_to_global = FALSE) {
   })
   
   
-  # Onion sowing date (vectorized) ----
-  
-  compute_onion_sowing_yday_fast <- compiler::cmpfun(function(df,
-                                                              T_soil_min_sowing_p,
-                                                              warm_days_needed_sowing_p,
-                                                              frost_buffer_days_sowing_p,
-                                                              min_yday_sowing_c,
-                                                              max_yday_sowing_c,
-                                                              rain_window_days_sowing_p,
-                                                              rain_sum_max_mm_sowing_p,
-                                                              min_dry_days_sowing_c) {
-    n <- nrow(df)
-    if (n == 0L) return(max_yday_sowing_c)
-    
-    # Window lengths (converted to integers)
-    n_warm  <- max(1L, as.integer(round(warm_days_needed_sowing_p)))
-    n_frost <- max(1L, as.integer(round(frost_buffer_days_sowing_p)))
-    n_rain  <- max(1L, as.integer(round(rain_window_days_sowing_p)))
-    n_dry   <- max(1L, as.integer(round(min_dry_days_sowing_c)))
-    
-    # Basic flags
-    frost_flag <- df$Tmin < -2                     # frost occurrence
-    is_dry     <- is.na(df$Prec) | df$Prec == 0    # no rain recorded
-    
-    # 1) Warm spell: soil temperature at 5 cm above threshold
-    warm_ok <- data.table::frollsum(
-      df$Ts_5cm_smooth >= T_soil_min_sowing_p,
-      n      = n_warm,
-      align  = "left",
-      fill   = 0L
-    ) == n_warm
-    
-    # 2) Frost buffer after warm spell
-    frost_sum <- data.table::frollsum(
-      frost_flag,
-      n      = n_frost,
-      align  = "left",
-      fill   = 0L
-    )
-    frost_ok  <- data.table::shift(frost_sum, n = n_warm, fill = 0L) == 0L
-    
-    # 3) Preceding rain (before current day)
-    Prec0 <- ifelse(is.na(df$Prec), 0, df$Prec)
-    rain_prev <- data.table::frollsum(
-      Prec0,
-      n      = n_rain,
-      align  = "right",
-      fill   = 0
-    )
-    rain_prev_excl_today <- data.table::shift(rain_prev, n = 1L, fill = 0)
-    
-    # 4) Dry streak (consecutive dry days up to current day)
-    dry_streak <- consec_counter(is_dry)
-    
-    # 5) Calendar window
-    in_window <- df$yday >= min_yday_sowing_c & df$yday <= max_yday_sowing_c
-    
-    # Candidate days: satisfy all conditions
-    cand <- warm_ok & frost_ok &
-      (rain_prev_excl_today <= rain_sum_max_mm_sowing_p) &
-      (dry_streak >= n_dry) & in_window
-    
-    idx <- which(cand)
-    if (length(idx) == 0L) return(max_yday_sowing_c)
-    
-    # Place sowing at the end of the warm spell
-    end_idx <- idx[1] + n_warm - 1L
-    end_idx <- min(end_idx, n)
-    df$yday[end_idx]
-  })
-  
-  
   # Stress functions (abiotic & biotic) ----
   
-  # Drought stress: combines RH, high temperature and dry spell length
-  get_drought_stress <- compiler::cmpfun(function(Tavg,
-                                                  RH_mean,
-                                                  days_consec_dry,
-                                                  rh_drought_threshold_p,
-                                                  Tavg_drought_threshold_p,
-                                                  impact_rh_drought_t,
-                                                  impact_days_dry_drought_t,
-                                                  impact_temp_drought_t) {
-    # RH component
-    R_RH <- ifelse(
-      RH_mean < rh_drought_threshold_p,
-      1 - exp(- (impact_rh_drought_t / 2) * (rh_drought_threshold_p - RH_mean)),
-      0
-    )
-    R_RH <- pmin(R_RH, 1)
+  # seedbed stress
+  
+  get_seedbed_stress <- compiler::cmpfun(function(Prec_before_sow,
+                                                  prec_seedbed_medium_p,
+                                                  prec_seedbed_high_p,
+                                                  impact_days_seedbed_t) {
+    # Tage mit „mittel“ und „stark“ Regen
+    wet_med  <- sum(Prec_before_sow >= prec_seedbed_medium_p &
+                      Prec_before_sow <  prec_seedbed_high_p,
+                    na.rm = TRUE)
+    wet_high <- sum(Prec_before_sow >= prec_seedbed_high_p, na.rm = TRUE)
     
-    # Temperature component
-    R_T  <- ifelse(
-      Tavg > Tavg_drought_threshold_p,
-      1 - exp(- (impact_temp_drought_t / 2) * (Tavg - Tavg_drought_threshold_p)),
-      0
-    )
-    R_T <- pmin(R_T, 1)
+    # gewichtete Summe (z.B. Starkregen doppelt)
+    wet_days_weighted <- wet_med + 2 * wet_high
     
-    # Dry streak component
-    R_D <- 1 - exp(- (impact_days_dry_drought_t / 2) * days_consec_dry)
-    R_D <- pmin(R_D, 1)
-    
-    pmin(R_RH * R_T * R_D, 1)
+    # Risiko als saturierende Funktion der nassen Tage
+    risk_seedbed <- 1 - exp(- (impact_days_seedbed_t / 2) * wet_days_weighted)
+    pmin(risk_seedbed, 1)
   })
   
   # Extreme rain stress: weighted count of extreme rainfall days
@@ -238,6 +157,30 @@ helper_function <- function(attach_to_global = FALSE) {
     pmin(risk_hail, 1)
   })
   
+  # heat: stress (defined but not yet wired into main model)
+  get_heat_stress <- compiler::cmpfun(function(Tmax,
+                                               days_consec_hot,
+                                               Tmax_heat_threshold_p,
+                                               impact_temp_heat_t,
+                                               impact_days_heat_t) {
+    # Temperature component: how far above threshold
+    R_T <- ifelse(
+      Tmax > Tmax_heat_threshold_p,
+      1 - exp(- (impact_temp_heat_t / 2) * (Tmax - Tmax_heat_threshold_p)),
+      0
+    )
+    R_T <- pmin(R_T, 1)
+    
+    # Hot streak component: how long the heat lasted
+    R_D <- 1 - exp(- (impact_days_heat_t / 2) * days_consec_hot)
+    R_D <- pmin(R_D, 1)
+    
+    pmin(R_T * R_D, 1)
+  })
+  
+  ## Biotic Stress factors
+  
+  
   # Botrytis stress: high RH, many wet days, suitable T range
   
   get_botrytis_stress <- compiler::cmpfun(function(Tmin,      
@@ -248,7 +191,6 @@ helper_function <- function(attach_to_global = FALSE) {
                                                    impact_days_wet_botrytis_t,
                                                    Topt_botrytis_p,
                                                    Twidth_botrytis_p) {
-
     
     # 1) Luftfeuchte-Gate: ohne sehr hohe RH kein Risiko
     R_H <- ifelse(
@@ -280,7 +222,6 @@ helper_function <- function(attach_to_global = FALSE) {
                                                        impact_days_wet_mildew_t,
                                                        Topt_mildew_p,
                                                        Twidth_mildew_p) {
-  
     
     # 1) High RH required 
     R_H <- ifelse(
@@ -372,25 +313,28 @@ helper_function <- function(attach_to_global = FALSE) {
     LUE_onion * PAR * (1 - exp(-lec_k * LAI)) * f_T * f_W
   })
   
-
-# total_biomass       -> g DM / m² (Summe)
-# PAR: MJ m^-2 d^-1
-# LUE_onion_p: g DM MJ^-1
-# calc_bio_vectorized -> g DM m^-2 d^-1
+  
+  # total_biomass       -> g DM / m² (Summe)
+  # PAR: MJ m^-2 d^-1
+  # LUE_onion_p: g DM MJ^-1
+  # calc_bio_vectorized -> g DM m^-2 d^-1
   
   
   
   # Collect helpers and optionally attach to global environment ----
+  # NOTE: the drought and sowing helpers are intentionally **not**
+  # included here in this version, but are kept in the header comments
+  # for documentation of the original model design.
   
   helpers <- list(
     sat                         = sat,
     expected_loss               = expected_loss,
     fast_chance_event           = fast_chance_event,
     consec_counter              = consec_counter,
-    compute_onion_sowing_yday_fast = compute_onion_sowing_yday_fast,
-    get_drought_stress          = get_drought_stress,
+    get_seedbed_stress          = get_seedbed_stress,
     get_extreme_rain_stress     = get_extreme_rain_stress,
     get_hail_stress             = get_hail_stress,
+    get_heat_stress             = get_heat_stress,
     get_botrytis_stress         = get_botrytis_stress,
     get_downy_mildew_stress     = get_downy_mildew_stress,
     get_thrips_stress           = get_thrips_stress,

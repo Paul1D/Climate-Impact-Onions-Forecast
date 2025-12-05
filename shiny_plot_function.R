@@ -37,36 +37,42 @@ scenario_labels <- c(
 )
 
 # Stressfaktoren (Codes -> deutsche Labels)
+# Angepasst an die neuen Output-Multiplikatoren:
+#   EM: exrain, hail, fus
+#   VG: heat, exrain, hail, fus, mildew, thrips
+#   BL: heat, exrain, hail, fus, mildew, botrytis, thrips
+#   MT: heat, exrain, hail, fus, mildew, botrytis, thrips
 stress_labels <- c(
   # Keimphase (em)
-  "m_drought_em"  = "Dürre (Keimphase)", 
   "m_exrain_em"   = "Starkregen (Keimphase)",
   "m_hail_em"     = "Hagel (Keimphase)",
   "m_fus_em"      = "Fusarium (Keimphase)",
   
   # Vegetative Phase (vg)
-  "m_drought_vg"      = "Dürre (Vegetative Phase)",
-  "m_exrain_vg"       = "Starkregen (Vegetative Phase)",
-  "m_hail_vg"         = "Hagel (Vegetative Phase)",
-  "m_fus_vg"          = "Fusarium (Vegetative Phase)",
-  "m_mildew_vg"       = "Falscher Mehltau (Vegetative Phase)",
-  "m_thrips_vg"       = "Thripse (Vegetative Phase)",
+  "m_heat_vg"     = "Hitze (Vegetative Phase)",
+  "m_exrain_vg"   = "Starkregen (Vegetative Phase)",
+  "m_hail_vg"     = "Hagel (Vegetative Phase)",
+  "m_fus_vg"      = "Fusarium (Vegetative Phase)",
+  "m_mildew_vg"   = "Falscher Mehltau (Vegetative Phase)",
+  "m_thrips_vg"   = "Thripse (Vegetative Phase)",
   
   # Zwiebelbildung (bl)
-  "m_drought_bl"      = "Dürre (Zwiebelbildung)",
-  "m_exrain_bl"       = "Starkregen (Zwiebelbildung)",
-  "m_hail_bl"         = "Hagel (Zwiebelbildung)",
-  "m_botrytis_bl"     = "Botrytis (Zwiebelbildung)",
-  "m_fus_bl"          = "Fusarium (Zwiebelbildung)",
-  "m_mildew_bl"       = "Falscher Mehltau (Zwiebelbildung)",
+  "m_heat_bl"     = "Hitze (Zwiebelbildung)",
+  "m_exrain_bl"   = "Starkregen (Zwiebelbildung)",
+  "m_hail_bl"     = "Hagel (Zwiebelbildung)",
+  "m_fus_bl"      = "Fusarium (Zwiebelbildung)",
+  "m_mildew_bl"   = "Falscher Mehltau (Zwiebelbildung)",
+  "m_botrytis_bl" = "Botrytis (Zwiebelbildung)",
+  "m_thrips_bl"   = "Thripse (Zwiebelbildung)",
   
   # Reifephase (mt)
-  "m_drought_mt"      = "Dürre (Reifephase)",
-  "m_exrain_mt"       = "Starkregen (Reifephase)",
-  "m_hail_mt"         = "Hagel (Reifephase)",
-  "m_botrytis_mt"     = "Botrytis (Reifephase)",
-  "m_fus_mt"          = "Fusarium (Reifephase)",
-  "m_mildew_mt"       = "Falscher Mehltau (Reifephase)"
+  "m_heat_mt"     = "Hitze (Reifephase)",
+  "m_exrain_mt"   = "Starkregen (Reifephase)",
+  "m_hail_mt"     = "Hagel (Reifephase)",
+  "m_fus_mt"      = "Fusarium (Reifephase)",
+  "m_mildew_mt"   = "Falscher Mehltau (Reifephase)",
+  "m_botrytis_mt" = "Botrytis (Reifephase)",
+  "m_thrips_mt"   = "Thripse (Reifephase)"
 )
 
 phase_order <- c("Keimphase", "Vegetative Phase", "Zwiebelbildung", "Reifephase")
@@ -154,8 +160,8 @@ VIP_table <- function (plsrResults, input_table = NULL, cut_off_line = 1,
 run_plsr_for_scenario_onion <- function(sim_list, scen_code,
                                         min_nonzero = 5) {
   
-  # Zielvariable: final_yield_per_ha für dieses Szenario
-  y_col <- paste0(scen_code, ".final_yield_per_ha")
+  # Zielvariable: irrigated final_yield_per_ha für dieses Szenario
+  y_col <- paste0(scen_code, ".final_yield_per_ha_irrigated")
   if (!y_col %in% names(sim_list$y))
     stop("Spalte ", y_col, " nicht in sim_list$y gefunden.")
   
@@ -175,7 +181,7 @@ run_plsr_for_scenario_onion <- function(sim_list, scen_code,
          " gibt es keine Stressvariablen mit ausreichender Variation.")
   }
   
-  # Szenario-Präfix weg, damit Variablen m_drought_em heißen
+  # Szenario-Präfix weg, damit Variablen m_heat_vg, m_exrain_bl, ... heißen
   names(x) <- sub(paste0("^", scen_code, "\\."), "", names(x))
   
   sim_obj <- list(y = y, x = x)
@@ -213,26 +219,19 @@ run_plsr_for_scenario_onion <- function(sim_list, scen_code,
   # Dynamische VIP-Breaks für die Legende (3 schöne Werte im Bereich der Daten)
   vip_range  <- range(vip_tab$VIP, na.rm = TRUE)
   vip_breaks <- pretty(vip_range, n = 3)
-  # Falls pretty etwas außerhalb des Datenbereichs schlägt, leicht beschneiden:
   vip_breaks <- vip_breaks[vip_breaks >= vip_range[1] & vip_breaks <= vip_range[2]]
-  # Sicherheitsfallback, falls aus irgendeinem Grund nichts übrig bleibt
   if (length(vip_breaks) == 0) {
     vip_breaks <- vip_range
   }
   
   p <- ggplot(vip_tab, aes(x = scenario, y = stress_lab)) +
     geom_point(aes(size = VIP, color = coef_sign), shape = 16) +
-    
-    # VIP = Wichtigkeit der Variable
-    # -> größere Range und dynamische Breaks für bessere Unterscheidbarkeit
     scale_size_continuous(
-      range  = c(3, 10),                      # minimale & maximale Punktgröße
+      range  = c(3, 10),
       breaks = vip_breaks,
       labels = round(vip_breaks, 2),
       name   = "VIP\n(Variable Importance in Projection)"
     ) +
-    
-    # Farben nur zur visuellen Unterscheidung – ohne eigene Legende
     scale_color_manual(
       values = c(
         negative = "firebrick",
@@ -241,16 +240,14 @@ run_plsr_for_scenario_onion <- function(sim_list, scen_code,
       ),
       guide = "none"
     ) +
-    
-    # fixe Y-Achse mit allen Stressfaktoren
+    # <<< HIER ist die Änderung: limits = rev(order_labels)
     scale_y_discrete(
-      limits = order_labels,
+      limits = rev(order_labels),
       drop   = FALSE,
       expand = expansion(mult = c(0.02, 0.06))
     ) +
-    
     labs(
-      title = scenario_labels[scen_code],   # Titel wie im Yield-Plot
+      title = scenario_labels[scen_code],
       x     = "Szenario",
       y     = "Stressfaktor (Phase)"
     ) +
@@ -265,7 +262,6 @@ run_plsr_for_scenario_onion <- function(sim_list, scen_code,
       legend.key.width   = grid::unit(0.6, "cm"),
       legend.text        = element_text(size = 9)
     ) +
-    # Legendenpunkte im VIP-Teil in Rot, mit klar sichtbarer Größe
     guides(
       size = guide_legend(
         override.aes = list(
@@ -279,6 +275,7 @@ run_plsr_for_scenario_onion <- function(sim_list, scen_code,
   
   list(result = pls_res, plot = p)
 }
+
 
 
 ############################################################
@@ -301,12 +298,10 @@ VIP_plot_onion <- function(sim_results, min_nonzero = 5) {
                 axis.ticks.y = element_blank())
   
   comparison_plot <-
-    # erster Plot: Y-Beschriftungen behalten, aber LEGENDE aus
     (results[[1]]$plot + no_x + theme(legend.position = "none")) +
     (results[[2]]$plot + no_x + no_y + theme(legend.position = "none")) +
     (results[[3]]$plot + no_x + no_y + theme(legend.position = "none")) +
     (results[[4]]$plot + no_x + no_y + theme(legend.position = "none")) +
-    # letzter Plot: ohne Y-Beschriftung, aber mit Legende
     (results[[5]]$plot + no_x + no_y) +
     plot_layout(ncol = 5)
   
@@ -319,34 +314,38 @@ VIP_plot_onion <- function(sim_results, min_nonzero = 5) {
 
 onion_plots <- function(onion_mc_sim_damage) {
   
+  # Irrigierte Erträge:
+  #   <scenario>.raw_yield_per_ha_irrigated
+  #   <scenario>.final_yield_per_ha_irrigated
+  
   results_yield_onion <- rbind(
     data.frame(
-      Ertrag               = onion_mc_sim_damage$y$historical.raw_yield_per_ha,
-      vermarktbarer_Ertrag = onion_mc_sim_damage$y$historical.final_yield_per_ha,
+      Ertrag               = onion_mc_sim_damage$y$historical.raw_yield_per_ha_irrigated,
+      vermarktbarer_Ertrag = onion_mc_sim_damage$y$historical.final_yield_per_ha_irrigated,
       id                   = seq_len(nrow(onion_mc_sim_damage$y)),
       scenario_code        = "historical"
     ),
     data.frame(
-      Ertrag               = onion_mc_sim_damage$y$ssp126.raw_yield_per_ha,
-      vermarktbarer_Ertrag = onion_mc_sim_damage$y$ssp126.final_yield_per_ha,
+      Ertrag               = onion_mc_sim_damage$y$ssp126.raw_yield_per_ha_irrigated,
+      vermarktbarer_Ertrag = onion_mc_sim_damage$y$ssp126.final_yield_per_ha_irrigated,
       id                   = seq_len(nrow(onion_mc_sim_damage$y)),
       scenario_code        = "ssp126"
     ),
     data.frame(
-      Ertrag               = onion_mc_sim_damage$y$ssp245.raw_yield_per_ha,
-      vermarktbarer_Ertrag = onion_mc_sim_damage$y$ssp245.final_yield_per_ha,
+      Ertrag               = onion_mc_sim_damage$y$ssp245.raw_yield_per_ha_irrigated,
+      vermarktbarer_Ertrag = onion_mc_sim_damage$y$ssp245.final_yield_per_ha_irrigated,
       id                   = seq_len(nrow(onion_mc_sim_damage$y)),
       scenario_code        = "ssp245"
     ),
     data.frame(
-      Ertrag               = onion_mc_sim_damage$y$ssp370.raw_yield_per_ha,
-      vermarktbarer_Ertrag = onion_mc_sim_damage$y$ssp370.final_yield_per_ha,
+      Ertrag               = onion_mc_sim_damage$y$ssp370.raw_yield_per_ha_irrigated,
+      vermarktbarer_Ertrag = onion_mc_sim_damage$y$ssp370.final_yield_per_ha_irrigated,
       id                   = seq_len(nrow(onion_mc_sim_damage$y)),
       scenario_code        = "ssp370"
     ),
     data.frame(
-      Ertrag               = onion_mc_sim_damage$y$ssp585.raw_yield_per_ha,
-      vermarktbarer_Ertrag = onion_mc_sim_damage$y$ssp585.final_yield_per_ha,
+      Ertrag               = onion_mc_sim_damage$y$ssp585.raw_yield_per_ha_irrigated,
+      vermarktbarer_Ertrag = onion_mc_sim_damage$y$ssp585.final_yield_per_ha_irrigated,
       id                   = seq_len(nrow(onion_mc_sim_damage$y)),
       scenario_code        = "ssp585"
     )
@@ -408,8 +407,7 @@ onion_plots <- function(onion_mc_sim_damage) {
       data = data.frame(yint = baseline_hist),
       aes(yintercept = yint, linetype = "baseline"),
       linewidth = 0.5,
-      colour = "black",
-      inherit.aes = FALSE
+      colour = "black"
     ) +
     scale_linetype_manual(
       name   = NULL,
@@ -461,9 +459,7 @@ build_stress_damage_long <- function(onion_mc_sim_damage) {
 
 make_yield_reduction_heatmap <- function(yield_damage_long) {
   
-  # 1) Zusammenfassung: mittlere Ertragsminderung in PROZENT ----------------
-  # damage wird als Anteil (0–1) angenommen -> *100 für Prozent
-  
+  # 1) Zusammenfassung: mittlere Ertragsminderung in PROZENT
   yield_red_summary <- yield_damage_long |>
     dplyr::mutate(
       CleanVar   = factor(CleanVar, levels = names(stress_labels)),
@@ -478,8 +474,7 @@ make_yield_reduction_heatmap <- function(yield_damage_long) {
       .groups        = "drop"
     )
   
-  # 2) Heatmap-Plot ---------------------------------------------------------
-  
+  # 2) Heatmap-Plot
   yield_reduction_plot <- ggplot(
     yield_red_summary,
     aes(
@@ -493,9 +488,6 @@ make_yield_reduction_heatmap <- function(yield_damage_long) {
       name   = "mittlere\nErtragsminderung [%]",
       low    = "white",
       high   = "firebrick"
-      # Optional: eigene Breaks setzen, z.B.:
-      # breaks = c(0, 5, 10, 20),
-      # limits = c(0, 20)
     ) +
     labs(
       title = "Ertragsminderungen nach Phase und Stressfaktor",
@@ -503,7 +495,7 @@ make_yield_reduction_heatmap <- function(yield_damage_long) {
       y     = "Stressfaktor (Phase)"
     ) +
     facet_grid(
-      rows  = vars(Phase),
+      rows   = vars(Phase),
       scales = "free_y",
       space  = "free_y"
     ) +
@@ -524,12 +516,12 @@ make_yield_reduction_heatmap <- function(yield_damage_long) {
 ## VERWENDUNG
 ############################################################
 ## VIP + Ertrags-Boxplots:
-  res <- onion_plots(onion_mc_sim_damage)
-   res$vip_plot
-   res$yield_plot
+ res <- onion_plots(onion_mc_sim_damage)
+ res$vip_plot
+ res$yield_plot
 ##
 ## Heatmap (optional):
-   dmg_long  <- build_stress_damage_long(onion_mc_sim_damage)
-   heat_plot <- make_yield_reduction_heatmap(dmg_long)
-   heat_plot
+dmg_long  <- build_stress_damage_long(onion_mc_sim_damage)
+ heat_plot <- make_yield_reduction_heatmap(dmg_long)
+ heat_plot
 ############################################################

@@ -364,6 +364,8 @@ compute_irrigation_geisenheim <- compiler::cmpfun(function(df, sow_yday, params,
 
 # MAIN MODEL FUNCTION ----------------------------------------------------
 
+# MAIN MODEL FUNCTION (IRRIGATED-ONLY) ----------------------------------
+
 onion_climate_impact <- compiler::cmpfun(function() {
   
   # 1) For each scenario, randomly sample one season (one id_season) ----
@@ -547,66 +549,7 @@ onion_climate_impact <- compiler::cmpfun(function() {
     
     
     # -----------------------------------------------------------------
-    # 6A) RAINFED biomass and yield (no irrigation) -------------------
-    # -----------------------------------------------------------------
-    
-    water_rf <- df$Prec  # only rainfall
-    
-    biomass_em_pot_rf <- sum(calc_bio_vectorized(
-      df$PAR[phase_data$em$idx], params$LAI_emergence_p,
-      df$Tavg[phase_data$em$idx], water_rf[phase_data$em$idx],
-      params$f_T_1_lower_p, params$f_T_1_upper_p,
-      params$f_T_0_lower_p, params$f_T_0_upper_p,
-      params$f_W_1_lower_p, params$f_W_1_upper_p,
-      params$f_W_0.5_p, params$LUE_onion_p, params$lec_k_c
-    ))
-    
-    biomass_vg_pot_rf <- sum(calc_bio_vectorized(
-      df$PAR[phase_data$vg$idx], params$LAI_veg_p,
-      df$Tavg[phase_data$vg$idx], water_rf[phase_data$vg$idx],
-      params$f_T_1_lower_p, params$f_T_1_upper_p,
-      params$f_T_0_lower_p, params$f_T_0_upper_p,
-      params$f_W_1_lower_p, params$f_W_1_upper_p,
-      params$f_W_0.5_p, params$LUE_onion_p, params$lec_k_c
-    ))
-    
-    biomass_bl_pot_rf <- sum(calc_bio_vectorized(
-      df$PAR[phase_data$bl$idx], params$LAI_bulbing_p,
-      df$Tavg[phase_data$bl$idx], water_rf[phase_data$bl$idx],
-      params$f_T_1_lower_p, params$f_T_1_upper_p,
-      params$f_T_0_lower_p, params$f_T_0_upper_p,
-      params$f_W_1_lower_p, params$f_W_1_upper_p,
-      params$f_W_0.5_p, params$LUE_onion_p, params$lec_k_c
-    ))
-    
-    biomass_mt_pot_rf <- sum(calc_bio_vectorized(
-      df$PAR[phase_data$mt$idx], params$LAI_maturation_p,
-      df$Tavg[phase_data$mt$idx], water_rf[phase_data$mt$idx],
-      params$f_T_1_lower_p, params$f_T_1_upper_p,
-      params$f_T_0_lower_p, params$f_T_0_upper_p,
-      params$f_W_1_lower_p, params$f_W_1_upper_p,
-      params$f_W_0.5_p, params$LUE_onion_p, params$lec_k_c
-    ))
-    
-    biomass_em_rf <- biomass_em_pot_rf * em_bio_multiplier
-    biomass_vg_rf <- biomass_vg_pot_rf * vg_bio_multiplier
-    biomass_bl_rf <- biomass_bl_pot_rf * bl_bio_multiplier
-    biomass_mt_rf <- biomass_mt_pot_rf * mt_bio_multiplier
-    
-    potential_biomass_g_m2_rf <- biomass_em_pot_rf + biomass_vg_pot_rf +
-      biomass_bl_pot_rf + biomass_mt_pot_rf
-    realized_biomass_g_m2_rf  <- biomass_em_rf + biomass_vg_rf +
-      biomass_bl_rf + biomass_mt_rf
-    
-    potential_biomass_t_ha_rf <- potential_biomass_g_m2_rf * 0.01
-    realized_biomass_t_ha_rf  <- realized_biomass_g_m2_rf  * 0.01
-    
-    potential_yield_DM_t_ha_rf <- potential_biomass_t_ha_rf * params$HI_onions_t
-    final_yield_DM_t_ha_rf     <- realized_biomass_t_ha_rf  * params$HI_onions_t
-    
-    
-    # -----------------------------------------------------------------
-    # 6B) IRRIGATED biomass and yield (Prec + Irrig_mm) ---------------
+    # IRRIGATED biomass and yield (Prec + Irrig_mm) -------------------
     # -----------------------------------------------------------------
     
     water_ir <- df$Prec + df$Irrig_mm  # rainfall + irrigation
@@ -678,10 +621,6 @@ onion_climate_impact <- compiler::cmpfun(function() {
       sowing_yday  = sow,
       harvest_yday = harvest_yday,
       
-      # rainfed yields
-      raw_yield_per_ha_rainfed   = potential_yield_DM_t_ha_rf,
-      final_yield_per_ha_rainfed = final_yield_DM_t_ha_rf,
-      
       # irrigated yields
       raw_yield_per_ha_irrigated   = potential_yield_DM_t_ha_ir,
       final_yield_per_ha_irrigated = final_yield_DM_t_ha_ir,
@@ -725,9 +664,6 @@ onion_climate_impact <- compiler::cmpfun(function() {
   
   return(results)
 })
-
-
-# Monte Carlo simulation ----
 
 input_variables <- read.csv("input_table_onion.csv", header = TRUE, sep = ";")
 
