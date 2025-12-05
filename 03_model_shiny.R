@@ -224,6 +224,14 @@ compute_all_risks <- compiler::cmpfun(function(phase_data, df, params) {
       params$Tmax_heat_threshold_p,
       params$impact_temp_heat_t,
       params$impact_days_heat_t
+    ),
+    thrips = get_thrips_stress(
+      vgs$T, vgs$RHmean, vgs$dry,
+      params$rh_thrips_threshold_p,
+      params$Topt_thrips_p,
+      params$Twidth_thrips_p,
+      params$impact_rh_thrips_t,
+      params$impact_days_dry_thrips_t
     )
   )
   
@@ -270,6 +278,14 @@ compute_all_risks <- compiler::cmpfun(function(phase_data, df, params) {
       params$Tmax_heat_threshold_p,
       params$impact_temp_heat_t,
       params$impact_days_heat_t
+    ),
+    thrips = get_thrips_stress(
+      vgs$T, vgs$RHmean, vgs$dry,
+      params$rh_thrips_threshold_p,
+      params$Topt_thrips_p,
+      params$Twidth_thrips_p,
+      params$impact_rh_thrips_t,
+      params$impact_days_dry_thrips_t
     )
   )
   
@@ -461,7 +477,6 @@ onion_climate_impact <- compiler::cmpfun(function() {
     LUE_onion_p        = LUE_onion_p,
     lec_k_c            = lec_k_c,
     onions_per_ha_p    = onions_per_ha_p,
-    dry_onion_weight_t = dry_onion_weight_t,
     HI_onions_t        = HI_onions_t
   )
   
@@ -511,32 +526,35 @@ onion_climate_impact <- compiler::cmpfun(function() {
     
     # Vegetative phase multipliers
     vg_multipliers <- c(
+      fast_chance_event(all_risks$vg["heat"],     params$yield_reduction_heat_t),
       fast_chance_event(all_risks$vg["exrain"],   params$yield_reduction_extreme_rain_t),
       fast_chance_event(all_risks$vg["hail"],     params$yield_reduction_hail_t),
       fast_chance_event(all_risks$vg["fusarium"], params$yield_reduction_fusarium_t),
       fast_chance_event(all_risks$vg["mildew"],   params$yield_reduction_downy_mildew_t),
-      fast_chance_event(all_risks$vg["thrips"],   params$yield_reduction_thrips_t),
-      fast_chance_event(all_risks$vg["heat"],     params$yield_reduction_heat_t)
+      fast_chance_event(all_risks$vg["thrips"],   params$yield_reduction_thrips_t)
+ 
     )
     
     # Bulbing phase multipliers
     bl_multipliers <- c(
+      fast_chance_event(all_risks$bl["heat"],     params$yield_reduction_heat_t),
       fast_chance_event(all_risks$bl["exrain"],   params$yield_reduction_extreme_rain_t),
       fast_chance_event(all_risks$bl["hail"],     params$yield_reduction_hail_t),
-      fast_chance_event(all_risks$bl["botrytis"], params$yield_reduction_botrytis_t),
       fast_chance_event(all_risks$bl["fusarium"], params$yield_reduction_fusarium_t),
       fast_chance_event(all_risks$bl["mildew"],   params$yield_reduction_downy_mildew_t),
-      fast_chance_event(all_risks$bl["heat"],     params$yield_reduction_heat_t)
+      fast_chance_event(all_risks$bl["botrytis"], params$yield_reduction_botrytis_t),
+      fast_chance_event(all_risks$bl["thrips"],   params$yield_reduction_thrips_t)
     )
     
     # Maturation phase multipliers
     mt_multipliers <- c(
+      fast_chance_event(all_risks$mt["heat"],     params$yield_reduction_heat_t),
       fast_chance_event(all_risks$mt["exrain"],   params$yield_reduction_extreme_rain_t),
       fast_chance_event(all_risks$mt["hail"],     params$yield_reduction_hail_t),
-      fast_chance_event(all_risks$mt["botrytis"], params$yield_reduction_botrytis_t),
       fast_chance_event(all_risks$mt["fusarium"], params$yield_reduction_fusarium_t),
       fast_chance_event(all_risks$mt["mildew"],   params$yield_reduction_downy_mildew_t),
-      fast_chance_event(all_risks$mt["heat"],     params$yield_reduction_heat_t)
+      fast_chance_event(all_risks$mt["botrytis"], params$yield_reduction_botrytis_t),
+      fast_chance_event(all_risks$mt["thrips"],   params$yield_reduction_thrips_t)
     )
     
     # Phase-wise biomass multipliers (product of individual stress effects)
@@ -697,26 +715,28 @@ onion_climate_impact <- compiler::cmpfun(function() {
       m_hail_em    = em_multipliers[2],
       m_fus_em     = em_multipliers[3],
       
-      m_exrain_vg  = vg_multipliers[1],
-      m_hail_vg    = vg_multipliers[2],
-      m_fus_vg     = vg_multipliers[3],
-      m_mildew_vg  = vg_multipliers[4],
-      m_thrips_vg  = vg_multipliers[5],
-      m_heat_vg    = vg_multipliers[6],
+      m_heat_vg    = vg_multipliers[1],
+      m_exrain_vg  = vg_multipliers[2],
+      m_hail_vg    = vg_multipliers[3],
+      m_fus_vg     = vg_multipliers[4],
+      m_mildew_vg  = vg_multipliers[5],
+      m_thrips_vg  = vg_multipliers[6],
       
-      m_exrain_bl  = bl_multipliers[1],
-      m_hail_bl    = bl_multipliers[2],
-      m_botrytis_bl= bl_multipliers[3],
+      m_heat_bl    = bl_multipliers[1],
+      m_exrain_bl  = bl_multipliers[2],
+      m_hail_bl    = bl_multipliers[3],
       m_fus_bl     = bl_multipliers[4],
       m_mildew_bl  = bl_multipliers[5],
-      m_heat_bl    = bl_multipliers[6],
+      m_botrytis_bl= bl_multipliers[6],
+      m_thrips_bl  = bl_multipliers[7],
       
-      m_exrain_mt  = mt_multipliers[1],
-      m_hail_mt    = mt_multipliers[2],
-      m_botrytis_mt= mt_multipliers[3],
+      m_heat_mt    = mt_multipliers[1],
+      m_exrain_mt  = mt_multipliers[2],
+      m_hail_mt    = mt_multipliers[3],
       m_fus_mt     = mt_multipliers[4],
-      m_mildew_mt  = mt_multipliers[5],
-      m_heat_mt    = mt_multipliers[6],
+      m_mildew_mt     = mt_multipliers[5],
+      m_botrytis_mt  = mt_multipliers[6],
+      m_thrips_mt    = mt_multipliers[7],
       
       # irrigation summary
       total_irrigation_mm = sum(df$Irrig_mm, na.rm = TRUE)
@@ -729,7 +749,7 @@ onion_climate_impact <- compiler::cmpfun(function() {
 
 # Monte Carlo simulation ----
 
-input_variables <- read.csv("input_table_onion.csv", header = TRUE, sep = ";")
+input_variables <- read.csv("input_table_onion_new.csv", header = TRUE, sep = ";")
 
 onion_mc_simulation <- mcSimulation(
   estimate          = as.estimate(input_variables),
