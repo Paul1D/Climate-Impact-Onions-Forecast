@@ -226,7 +226,7 @@ compute_all_risks <- compiler::cmpfun(function(phase_data, df, params) {
       params$impact_days_heat_t
     ),
     thrips = get_thrips_stress(
-      vgs$T, vgs$RHmean, vgs$dry,
+      bls$T, bls$RHmean, bls$dry,
       params$rh_thrips_threshold_p,
       params$Topt_thrips_p,
       params$Twidth_thrips_p,
@@ -280,7 +280,7 @@ compute_all_risks <- compiler::cmpfun(function(phase_data, df, params) {
       params$impact_days_heat_t
     ),
     thrips = get_thrips_stress(
-      vgs$T, vgs$RHmean, vgs$dry,
+      mts$T, mts$RHmean, mts$dry,
       params$rh_thrips_threshold_p,
       params$Topt_thrips_p,
       params$Twidth_thrips_p,
