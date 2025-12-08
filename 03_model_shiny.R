@@ -749,7 +749,7 @@ onion_climate_impact <- compiler::cmpfun(function() {
 
 # Monte Carlo simulation ----
 
-input_variables <- read.csv("input_table_onion_new.csv", header = TRUE, sep = ";")
+input_variables <- read.csv("input_table_onion.csv", header = TRUE, sep = ";")
 
 onion_mc_simulation <- mcSimulation(
   estimate          = as.estimate(input_variables),
